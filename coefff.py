@@ -348,6 +348,21 @@ class LidarCameraVisualizer:
         # Calibration factors for lean correction
         self.side_lean_max_adjustment = 6.0  # mm, maximum adjustment for side lean
         self.forward_lean_max_adjustment = 4.0  # mm, maximum adjustment for forward lean
+        
+        # Coefficient strength scaling factors (per segment and ring)
+        self.coefficient_scaling = {
+            # Initialize with default scaling of 1.0 for all segments and rings
+            # Format: {segment_number: {'doubles': scale, 'trebles': scale, 'small': scale, 'large': scale}}
+        }
+        
+        # Set default values for all segments (1-20)
+        for segment in range(1, 21):
+            self.coefficient_scaling[segment] = {
+                'doubles': 1.0,  # Scale for double ring
+                'trebles': 1.0,  # Scale for treble ring
+                'small': 1.0,    # Scale for inner single area (small segments)
+                'large': 1.0     # Scale for outer single area (large segments)
+            }
 
         # Setup visualization
         self.setup_plot()
@@ -1263,6 +1278,22 @@ class LidarCameraVisualizer:
 
     # Add the calibration_mode method here, right after the run method
     def calibration_mode(self):
+        """Interactive calibration for LIDAR rotation and coefficient scaling."""
+        print("Calibration Mode")
+        print("1. LIDAR Rotation Calibration")
+        print("2. Coefficient Scaling Calibration")
+        print("q. Quit")
+        
+        option = input("Select option: ")
+        
+        if option == "1":
+            self._calibrate_lidar_rotation()
+        elif option == "2":
+            self._calibrate_coefficient_scaling()
+        else:
+            print("Exiting calibration mode.")
+    
+    def _calibrate_lidar_rotation(self):
         """Interactive calibration for LIDAR rotation."""
         print("LIDAR Rotation Calibration Mode")
         print(f"Current LIDAR1 rotation: {self.lidar1_rotation}°")
@@ -1287,13 +1318,124 @@ class LidarCameraVisualizer:
                 print(f"Updated LIDAR2 rotation: {self.lidar2_rotation}°")
             except:
                 print("Invalid command format")
+    
+    def _calibrate_coefficient_scaling(self):
+        """Interactive calibration for coefficient scaling factors."""
+        print("Coefficient Scaling Calibration Mode")
+        print("Adjust scaling factors for specific segments and ring types.")
+        print("Format: [segment]:[ring_type]:[scale]")
+        print("  - segment: 1-20 or 'all'")
+        print("  - ring_type: 'doubles', 'trebles', 'small', 'large', or 'all'")
+        print("  - scale: scaling factor (e.g. 0.5, 1.0, 1.5)")
+        print("Example: 20:doubles:1.5 - Sets double ring scaling for segment 20 to 1.5")
+        print("Example: all:trebles:0.8 - Sets treble ring scaling for all segments to 0.8")
+        
+        while True:
+            cmd = input("Enter scaling command or 'q' to quit: ")
+            if cmd.lower() == 'q':
+                break
+                
+            try:
+                parts = cmd.split(':')
+                if len(parts) != 3:
+                    print("Invalid format. Use segment:ring_type:scale")
+                    continue
+                    
+                segment_str, ring_type, scale_str = parts
+                scale = float(scale_str)
+                
+                # Process segment specification
+                segments = []
+                if segment_str.lower() == 'all':
+                    segments = list(range(1, 21))
+                else:
+                    try:
+                        segment_num = int(segment_str)
+                        if 1 <= segment_num <= 20:
+                            segments = [segment_num]
+                        else:
+                            print("Segment must be between 1-20 or 'all'")
+                            continue
+                    except ValueError:
+                        print("Segment must be a number between 1-20 or 'all'")
+                        continue
+                
+                # Process ring type specification
+                ring_types = []
+                if ring_type.lower() == 'all':
+                    ring_types = ['doubles', 'trebles', 'small', 'large']
+                elif ring_type.lower() in ['doubles', 'trebles', 'small', 'large']:
+                    ring_types = [ring_type.lower()]
+                else:
+                    print("Ring type must be 'doubles', 'trebles', 'small', 'large', or 'all'")
+                    continue
+                
+                # Update scaling factors
+                for segment in segments:
+                    for rt in ring_types:
+                        self.coefficient_scaling[segment][rt] = scale
+                        
+                print(f"Updated scaling factors for {len(segments)} segment(s) and {len(ring_types)} ring type(s)")
+                
+                # Print current settings for verification
+                if len(segments) <= 3:  # Only print details for a few segments to avoid cluttering
+                    for segment in segments:
+                        print(f"Segment {segment}: " + ", ".join([f"{rt}={self.coefficient_scaling[segment][rt]}" for rt in ring_types]))
+                else:
+                    # Just print a summary
+                    print(f"Set {', '.join(ring_types)} scaling factor to {scale} for segments {segments[0]}-{segments[-1]}")
+                    
+            except ValueError:
+                print("Scale must be a numeric value")
+    def save_coefficient_scaling(self, filename="coefficient_scaling.json"):
+        """Save the current coefficient scaling configuration to a JSON file."""
+        try:
+            with open(filename, 'w') as f:
+                json.dump(self.coefficient_scaling, f, indent=2)
+            print(f"Coefficient scaling saved to {filename}")
+            return True
+        except Exception as e:
+            print(f"Error saving coefficient scaling: {e}")
+            return False
+    
+    def load_coefficient_scaling(self, filename="coefficient_scaling.json"):
+        """Load coefficient scaling configuration from a JSON file."""
+        try:
+            if os.path.exists(filename):
+                with open(filename, 'r') as f:
+                    loaded_scaling = json.load(f)
+                    
+                # Convert string keys back to integers
+                self.coefficient_scaling = {int(k): v for k, v in loaded_scaling.items()}
+                print(f"Coefficient scaling loaded from {filename}")
+                return True
+            else:
+                print(f"Scaling file {filename} not found, using defaults")
+                return False
+        except Exception as e:
+            print(f"Error loading coefficient scaling: {e}")
+            return False
+
 if __name__ == "__main__":
     lidar1_script = "./tri_test_lidar1"
     lidar2_script = "./tri_test_lidar2"
     visualizer = LidarCameraVisualizer()
     
-    # Add option for calibration mode
-    if len(sys.argv) > 1 and sys.argv[1] == "--calibrate":
-        visualizer.calibration_mode()
+    # Try to load coefficient scaling from file
+    visualizer.load_coefficient_scaling()
+    
+    # Parse command line arguments
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--calibrate":
+            visualizer.calibration_mode()
+            # After calibration, ask to save settings
+            save = input("Save coefficient scaling settings? (y/n): ")
+            if save.lower() == 'y':
+                visualizer.save_coefficient_scaling()
+        elif sys.argv[1] == "--help":
+            print("Usage:")
+            print("  python script.py                  - Run the program normally")
+            print("  python script.py --calibrate      - Enter calibration mode")
+            print("  python script.py --help           - Show this help message")
     else:
         visualizer.run(lidar1_script, lidar2_script)
