@@ -33,6 +33,12 @@ class SimpleCameraLeanDetector:
         self.lean_history = []  # Store recent lean readings for smoothing
         self.max_lean_history = 10  # Keep track of last 10 lean readings
         
+        # Debug mode for additional output
+        self.debug_mode = True
+        
+        # OpenCV window settings
+        self.show_opencv_windows = True
+        
         # Running flag
         self.running = True
         
@@ -98,7 +104,13 @@ class SimpleCameraLeanDetector:
         Calculate the angle of the dart tip relative to vertical.
         Returns angle in degrees where:
         - 90 degrees = perfectly upright (perpendicular to board)
-        - 0 degrees = flat against the board (parallel)
+        - 0 degrees = flat against the board (parallel to left)
+        - 180 degrees = flat against the board (parallel to right)
+        
+        This gives us a clearer indication of lean direction:
+        - angle < 90: leaning left
+        - angle > 90: leaning right
+        - angle = 90: perfectly vertical
         """
         if len(contour) < 5:
             return None
@@ -108,12 +120,26 @@ class SimpleCameraLeanDetector:
             ellipse = cv2.fitEllipse(contour)
             center, axes, angle = ellipse
             
-            # Convert to 0-90 degrees relative to vertical (90° = vertical)
-            if angle > 90:
-                angle = 180 - angle
+            # OpenCV's ellipse angle is measured from horizontal
+            # and in counterclockwise direction (0-180)
             
-            return angle
-        except:
+            # Convert to our desired scale:
+            # - 90 = vertical
+            # - <90 = leaning left
+            # - >90 = leaning right
+            adjusted_angle = angle
+            
+            # If angle is >90 degrees, it's flipped because of the ellipse ambiguity
+            # We need to map this correctly to indicate lean direction
+            if adjusted_angle > 90:
+                adjusted_angle = 180 - adjusted_angle
+                
+            # DEBUG: print original and adjusted angles
+            print(f"Original ellipse angle: {angle:.1f}°, Adjusted angle: {adjusted_angle:.1f}°")
+                
+            return adjusted_angle
+        except Exception as e:
+            print(f"Error calculating angle: {e}")
             return None
     
     def process_camera_frame(self, frame):
@@ -198,19 +224,36 @@ class SimpleCameraLeanDetector:
                 cv2.drawContours(roi_vis, [tip_contour], -1, (0, 255, 0), 2)
                 cv2.circle(roi_vis, lowest_point, 5, (0, 0, 255), -1)
                 
-                # Draw lean angle indicator
+                # Draw lean angle indicator - NOTE: This shows the ACTUAL direction, not mirrored
                 if dart_angle is not None:
-                    # Calculate line endpoint for angle visualization
+                    # Calculate line endpoint for angle visualization on the camera view
                     line_length = 30
-                    angle_rad = np.radians(90 - dart_angle)  # Convert to radians and adjust
+                    
+                    # Adjust visualization based on lean direction (actual, not mirrored)
+                    if dart_angle < 90:
+                        # Leaning left
+                        lean_degrees = 90 - dart_angle
+                        angle_rad = np.radians(-lean_degrees)  # Negative angle to go left
+                    else:
+                        # Leaning right
+                        lean_degrees = dart_angle - 90
+                        angle_rad = np.radians(lean_degrees)  # Positive angle to go right
+                    
+                    # Calculate endpoint
                     end_x = int(lowest_point[0] + line_length * np.sin(angle_rad))
                     end_y = int(lowest_point[1] + line_length * np.cos(angle_rad))
                     
                     # Draw line showing dart angle
                     cv2.line(roi_vis, lowest_point, (end_x, end_y), (255, 0, 0), 2)
                     
-                    # Add angle text
-                    cv2.putText(roi_vis, f"{dart_angle:.1f}°", 
+                    # Add angle text with lean direction
+                    lean_direction = "Vertical"
+                    if dart_angle < 85:
+                        lean_direction = "Left"
+                    elif dart_angle > 95:
+                        lean_direction = "Right"
+                        
+                    cv2.putText(roi_vis, f"{dart_angle:.1f}° ({lean_direction})", 
                                (lowest_point[0] + 10, lowest_point[1] - 10),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
         
@@ -255,9 +298,21 @@ class SimpleCameraLeanDetector:
         # Calculate dart line points
         dart_length = 2.0  # Length of visualization line
         
-        # Convert to radians and adjust coordinate system
-        angle_rad = np.radians(90 - dart_angle)  # 90° = vertical
+        # For accurate dart visualization, we need to reverse the direction
+        # since the physical dart lean should be mirrored in the visualization
         
+        # Convert angle to lean direction (ensuring correct visual representation that MIRRORS the dart)
+        # For darts leaning left (angle < 90), we want the line to angle RIGHT (opposite)
+        # For darts leaning right (angle > 90), we want the line to angle LEFT (opposite)
+        if dart_angle < 90:
+            # Dart leaning left - line should angle rightward from base (mirror image)
+            lean_degrees = 90 - dart_angle  # How many degrees left of vertical
+            angle_rad = np.radians(lean_degrees)  # Positive to go right (mirroring)
+        else:
+            # Dart leaning right - line should angle leftward from base (mirror image)
+            lean_degrees = dart_angle - 90  # How many degrees right of vertical
+            angle_rad = np.radians(-lean_degrees)  # Negative to go left (mirroring)
+            
         # Calculate endpoint
         x_end = normalized_pos + dart_length * np.sin(angle_rad)
         y_end = dart_length * np.cos(angle_rad)
@@ -305,6 +360,8 @@ class SimpleCameraLeanDetector:
             return
         
         print("Camera opened successfully. Press Ctrl+C to exit.")
+        print("Debug mode is ON. Press 'd' to toggle debug info.")
+        print("Press 'w' to toggle OpenCV windows.")
         
         try:
             while self.running:
@@ -331,16 +388,44 @@ class SimpleCameraLeanDetector:
                     avg_lean = sum(self.lean_history) / len(self.lean_history)
                     self.current_side_lean_angle = avg_lean
                     
+                    # Determine lean direction
+                    lean_direction = "Vertical"
+                    if avg_lean < 85:
+                        lean_direction = "LEFT"
+                    elif avg_lean > 95:
+                        lean_direction = "RIGHT"
+                    
                     # Print information for debugging
-                    print(f"Position: {detection['dart_mm_x']:.1f}mm, "
-                          f"Angle: {detection['dart_angle']:.1f}° (avg: {avg_lean:.1f}°)")
+                    if self.debug_mode:
+                        print(f"Position: {detection['dart_mm_x']:.1f}mm, "
+                              f"Angle: {detection['dart_angle']:.1f}° (avg: {avg_lean:.1f}°), "
+                              f"Lean: {lean_direction}")
+                
+                # Show OpenCV windows if enabled
+                if self.show_opencv_windows:
+                    cv2.imshow("Camera Feed", processed_frame)
+                    cv2.imshow("ROI", roi)
+                    cv2.imshow("Mask", mask)
                 
                 # Update the plot with new data
                 self.update_plot((processed_frame, roi, mask, detection))
                 plt.pause(0.01)  # Give the GUI time to update
+                
+                # Handle keyboard input
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord('q'):
+                    self.running = False
+                elif key == ord('d'):
+                    self.debug_mode = not self.debug_mode
+                    print(f"Debug mode {'ON' if self.debug_mode else 'OFF'}")
+                elif key == ord('w'):
+                    self.show_opencv_windows = not self.show_opencv_windows
+                    if not self.show_opencv_windows:
+                        cv2.destroyAllWindows()
         
         finally:
             cap.release()
+            cv2.destroyAllWindows()
             print("Camera released.")
     
     def run(self):
