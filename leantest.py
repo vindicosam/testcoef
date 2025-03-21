@@ -1,49 +1,22 @@
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
 import time
 import signal
 import sys
-import math
 
-class SimpleCameraLeanDetector:
+class SimpleDartDetector:
     def __init__(self):
         # Camera configuration
-        self.camera_data = {"dart_mm_x": None, "dart_angle": None}
-        
-        # ROI Settings and Pixel-to-mm Mapping
         self.roi_top = 148  # Top of the ROI
         self.roi_bottom = 185  # Bottom of the ROI
-        self.pixel_to_mm_x = (180 - (-180)) / (556 - 126)  # Calibrated conversion
-        self.camera_x_offset = 9.8  # Small offset to account for systematic error
         
-        # Detection persistence to maintain visibility
-        self.last_valid_detection = {"dart_mm_x": None, "dart_angle": None}
-        self.detection_persistence_counter = 0
-        self.detection_persistence_frames = 30
-        
-        # Camera background subtractor with sensitive parameters
-        self.camera_bg_subtractor = cv2.createBackgroundSubtractorMOG2(
+        # Background subtractor
+        self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
             history=30, varThreshold=25, detectShadows=False
         )
         
-        # 3D lean detection variables
-        self.current_side_lean_angle = 90.0  # 90 degrees = vertical
-        self.lean_history = []  # Store recent lean readings for smoothing
-        self.max_lean_history = 10  # Keep track of last 10 lean readings
-        
-        # Debug mode for additional output
-        self.debug_mode = True
-        
-        # OpenCV window settings
-        self.show_opencv_windows = True
-        
         # Running flag
         self.running = True
-        
-        # Setup visualization
-        self.setup_plot()
         
         # Signal handling
         signal.signal(signal.SIGINT, self.signal_handler)
@@ -51,393 +24,176 @@ class SimpleCameraLeanDetector:
     def signal_handler(self, signum, frame):
         self.running = False
         print("\nShutting down...")
-        plt.close("all")
         sys.exit(0)
-    
-    def setup_plot(self):
-        """Initialize the visualization plot"""
-        self.fig, self.ax = plt.subplots(figsize=(12, 8))
-        self.fig.suptitle("Dart Lean Detection", fontsize=16)
         
-        # Create subplot layout
-        self.gs = self.fig.add_gridspec(2, 2)
-        
-        # Camera view
-        self.ax_camera = self.fig.add_subplot(self.gs[0, 0])
-        self.ax_camera.set_title("Camera View")
-        self.camera_img = self.ax_camera.imshow(np.zeros((480, 640, 3), dtype=np.uint8))
-        
-        # ROI view
-        self.ax_roi = self.fig.add_subplot(self.gs[0, 1])
-        self.ax_roi.set_title("ROI with Detected Dart")
-        self.roi_img = self.ax_roi.imshow(np.zeros((self.roi_bottom - self.roi_top, 640, 3), dtype=np.uint8))
-        
-        # Processed mask view
-        self.ax_mask = self.fig.add_subplot(self.gs[1, 0])
-        self.ax_mask.set_title("Processed Mask")
-        self.mask_img = self.ax_mask.imshow(np.zeros((self.roi_bottom - self.roi_top, 640), dtype=np.uint8), cmap='gray')
-        
-        # Lean visualization
-        self.ax_lean = self.fig.add_subplot(self.gs[1, 1])
-        self.ax_lean.set_title("Dart Lean Visualization")
-        self.ax_lean.set_xlim(-2, 2)
-        self.ax_lean.set_ylim(-0.5, 2.5)
-        self.ax_lean.grid(True)
-        self.ax_lean.set_xlabel("Left-Right Position")
-        self.ax_lean.set_ylabel("Height")
-        
-        # Draw reference lines for lean
-        self.ax_lean.axhline(y=0, color='black', linestyle='-', alpha=0.3)  # Ground line
-        self.ax_lean.axvline(x=0, color='black', linestyle='--', alpha=0.3)  # Center line
-        
-        # Dart line visualization
-        self.dart_line, = self.ax_lean.plot([], [], 'r-', linewidth=3)
-        
-        # Text display for measurements
-        self.lean_text = self.ax_lean.text(-1.9, 2.2, "", fontsize=10)
-        
-        # Adjust layout
-        plt.tight_layout()
-    
-    def calculate_dart_angle(self, contour):
+    def detect_dart_angle(self, contour):
         """
-        Calculate the angle of the dart tip relative to vertical.
-        Returns angle in degrees where:
-        - 90 degrees = perfectly upright (perpendicular to board)
-        - 0 degrees = flat against the board (parallel to left)
-        - 180 degrees = flat against the board (parallel to right)
-        
-        This gives us a clearer indication of lean direction:
-        - angle < 90: leaning left
-        - angle > 90: leaning right
-        - angle = 90: perfectly vertical
+        Find the angle of the dart by fitting an ellipse to the contour.
         """
         if len(contour) < 5:
-            return None
-        
-        # Fit an ellipse to the contour
+            return None, None
+            
         try:
+            # Fit an ellipse to the contour
             ellipse = cv2.fitEllipse(contour)
             center, axes, angle = ellipse
             
-            # OpenCV's ellipse angle is measured from horizontal
-            # and in counterclockwise direction (0-180)
+            # In OpenCV, the angle is measured counter-clockwise from the horizontal axis
+            # We need to adjust it to be relative to vertical for our application
             
-            # Convert to our desired scale:
-            # - 90 = vertical
-            # - <90 = leaning left
-            # - >90 = leaning right
-            adjusted_angle = angle
+            # Convert to our reference system where:
+            # 90° = vertical
+            # <90° = leaning left
+            # >90° = leaning right
+            if angle > 90:
+                adjusted_angle = 180 - angle
+            else:
+                adjusted_angle = angle
+                
+            return center, adjusted_angle
             
-            # If angle is >90 degrees, it's flipped because of the ellipse ambiguity
-            # We need to map this correctly to indicate lean direction
-            if adjusted_angle > 90:
-                adjusted_angle = 180 - adjusted_angle
-                
-            # DEBUG: print original and adjusted angles
-            print(f"Original ellipse angle: {angle:.1f}°, Adjusted angle: {adjusted_angle:.1f}°")
-                
-            return adjusted_angle
         except Exception as e:
-            print(f"Error calculating angle: {e}")
-            return None
+            print(f"Error fitting ellipse: {e}")
+            return None, None
     
-    def process_camera_frame(self, frame):
-        """
-        Process a single camera frame to detect dart and lean angle.
-        
-        Args:
-            frame: Input camera frame
-            
-        Returns:
-            processed_frame: Frame with detection overlay
-            roi: Region of interest showing dart
-            mask: Processed binary mask 
-            detection_data: Dictionary with detection results
-        """
-        # Make a copy for visualization
-        vis_frame = frame.copy()
-        
-        # Flip the frame 180 degrees since camera is upside down
-        frame = cv2.rotate(frame, cv2.ROTATE_180)
-        vis_frame = cv2.rotate(vis_frame, cv2.ROTATE_180)
-        
-        # Extract ROI
-        roi = frame[self.roi_top:self.roi_bottom, :]
-        roi_vis = roi.copy()
-        
-        # Background subtraction and thresholding
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        fg_mask = self.camera_bg_subtractor.apply(gray)
-        
-        # More sensitive threshold
-        fg_mask = cv2.threshold(fg_mask, 180, 255, cv2.THRESH_BINARY)[1]
-        
-        # Morphological operations to enhance the dart
-        kernel = np.ones((3, 3), np.uint8)
-        fg_mask = cv2.dilate(fg_mask, kernel, iterations=1)
-        
-        # Reset current detection
-        detection_data = {
-            "dart_mm_x": None,
-            "dart_angle": None,
-            "tip_point": None,
-            "contour": None
-        }
-        
-        # Detect contours
-        contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        if contours:
-            # Find the dart tip (highest point since image is flipped)
-            tip_contour = None
-            lowest_point = (-1, -1)
-            
-            for contour in contours:
-                if cv2.contourArea(contour) > 50:  # Reduced threshold for smaller darts
-                    for point in contour:
-                        x, y = point[0]
-                        if tip_contour is None or y < lowest_point[1]:
-                            lowest_point = (x, y)
-                            tip_contour = contour
-            
-            if tip_contour is not None:
-                # Get dart angle
-                dart_angle = self.calculate_dart_angle(tip_contour)
-                
-                # Map pixels to mm coordinates with corrected mapping
-                tip_pixel_x = lowest_point[0]
-                dart_mm_x = 180 - (tip_pixel_x - 126) * self.pixel_to_mm_x + self.camera_x_offset
-                
-                # Save detection data
-                detection_data["dart_mm_x"] = dart_mm_x
-                detection_data["dart_angle"] = dart_angle
-                detection_data["tip_point"] = lowest_point
-                detection_data["contour"] = tip_contour
-                
-                # Update persistence
-                self.last_valid_detection["dart_mm_x"] = dart_mm_x
-                self.last_valid_detection["dart_angle"] = dart_angle
-                self.detection_persistence_counter = self.detection_persistence_frames
-                
-                # Draw detection on visualization
-                cv2.drawContours(roi_vis, [tip_contour], -1, (0, 255, 0), 2)
-                cv2.circle(roi_vis, lowest_point, 5, (0, 0, 255), -1)
-                
-                # Draw lean angle indicator - NOTE: This shows the ACTUAL direction, not mirrored
-                if dart_angle is not None:
-                    # Calculate line endpoint for angle visualization on the camera view
-                    line_length = 30
-                    
-                    # Adjust visualization based on lean direction (actual, not mirrored)
-                    if dart_angle < 90:
-                        # Leaning left
-                        lean_degrees = 90 - dart_angle
-                        angle_rad = np.radians(-lean_degrees)  # Negative angle to go left
-                    else:
-                        # Leaning right
-                        lean_degrees = dart_angle - 90
-                        angle_rad = np.radians(lean_degrees)  # Positive angle to go right
-                    
-                    # Calculate endpoint
-                    end_x = int(lowest_point[0] + line_length * np.sin(angle_rad))
-                    end_y = int(lowest_point[1] + line_length * np.cos(angle_rad))
-                    
-                    # Draw line showing dart angle
-                    cv2.line(roi_vis, lowest_point, (end_x, end_y), (255, 0, 0), 2)
-                    
-                    # Add angle text with lean direction
-                    lean_direction = "Vertical"
-                    if dart_angle < 85:
-                        lean_direction = "Left"
-                    elif dart_angle > 95:
-                        lean_direction = "Right"
-                        
-                    cv2.putText(roi_vis, f"{dart_angle:.1f}° ({lean_direction})", 
-                               (lowest_point[0] + 10, lowest_point[1] - 10),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-        
-        # If no dart detected but we have a valid previous detection
-        elif self.detection_persistence_counter > 0:
-            self.detection_persistence_counter -= 1
-            if self.detection_persistence_counter > 0:
-                detection_data["dart_mm_x"] = self.last_valid_detection["dart_mm_x"]
-                detection_data["dart_angle"] = self.last_valid_detection["dart_angle"]
-        
-        # Draw ROI box on the main frame
-        cv2.rectangle(vis_frame, (0, self.roi_top), (vis_frame.shape[1], self.roi_bottom), (255, 0, 0), 2)
-        
-        # Add detected information to the frame
-        if detection_data["dart_mm_x"] is not None:
-            text = f"X: {detection_data['dart_mm_x']:.1f}mm"
-            cv2.putText(vis_frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            
-        if detection_data["dart_angle"] is not None:
-            text = f"Angle: {detection_data['dart_angle']:.1f}°"
-            cv2.putText(vis_frame, text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        
-        return vis_frame, roi_vis, fg_mask, detection_data
-    
-    def visualize_lean(self, dart_angle, dart_mm_x):
-        """
-        Update the lean visualization based on detected angle and position.
-        
-        Args:
-            dart_angle: Angle of dart in degrees (90° = vertical)
-            dart_mm_x: X position of dart in mm
-        """
-        if dart_angle is None or dart_mm_x is None:
-            # No valid data, show no dart
-            self.dart_line.set_data([], [])
-            self.lean_text.set_text("No dart detected")
-            return
-        
-        # Normalize position to -2 to 2 range
-        normalized_pos = dart_mm_x / 180.0  # Assuming dart_mm_x ranges from -180 to 180
-        
-        # Calculate dart line points
-        dart_length = 2.0  # Length of visualization line
-        
-        # IMPORTANT: The visualization should directly match what we see in the camera
-        # If the dart is leaning left in the camera, the line should go left-down
-        # If the dart is leaning right in the camera, the line should go right-down
-        
-        # When a dart is leaning left (angle < 90), the line should go from (x,y) to (x-n,y-n) 
-        # When a dart is leaning right (angle > 90), the line should go from (x,y) to (x+n,y-n)
-        
-        # Calculate how much the dart deviates from vertical (in degrees)
-        deviation_degrees = 90 - dart_angle  # positive = lean left, negative = lean right
-        
-        # Convert to radians for trigonometry
-        deviation_rad = np.radians(deviation_degrees)
-        
-        # Calculate the x and y components of the line
-        # For a vertical dart (90°), sin(0) = 0, so x_offset = 0
-        # For a left-leaning dart (<90°), sin(+) = +, so x_offset < 0 (goes left)
-        # For a right-leaning dart (>90°), sin(-) = -, so x_offset > 0 (goes right)
-        x_offset = -dart_length * np.sin(deviation_rad)
-        y_offset = dart_length * np.cos(deviation_rad)
-        
-        # Calculate the endpoint of the line
-        x_end = normalized_pos + x_offset
-        y_end = y_offset
-        
-        # Update dart line visualization
-        self.dart_line.set_data([normalized_pos, x_end], [0, y_end])
-        
-        # Interpret lean direction
-        lean_direction = "Vertical"
-        if dart_angle < 85:
-            lean_direction = "Leaning Left"
-        elif dart_angle > 95:
-            lean_direction = "Leaning Right"
-        
-        # Update text
-        self.lean_text.set_text(
-            f"Position: {dart_mm_x:.1f} mm\n"
-            f"Angle: {dart_angle:.1f}° ({lean_direction})\n"
-            f"Deviation: {abs(90-dart_angle):.1f}° from vertical"
-        )
-    
-    def update_plot(self, frame_data):
-        """Update the visualization with new frame data"""
-        frame, roi, mask, detection = frame_data
-        
-        # Update images
-        self.camera_img.set_array(frame)
-        self.roi_img.set_array(roi)
-        self.mask_img.set_array(mask)
-        
-        # Update lean visualization
-        self.visualize_lean(detection["dart_angle"], detection["dart_mm_x"])
-        
-        return self.camera_img, self.roi_img, self.mask_img, self.dart_line, self.lean_text
-    
-    def camera_loop(self):
-        """Main camera processing loop"""
+    def run(self):
+        """Main processing loop"""
         cap = cv2.VideoCapture(0)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         
-        # Make sure the camera is opened
         if not cap.isOpened():
             print("Error: Could not open camera.")
             return
-        
-        print("Camera opened successfully. Press Ctrl+C to exit.")
-        print("Debug mode is ON. Press 'd' to toggle debug info.")
-        print("Press 'w' to toggle OpenCV windows.")
+            
+        print("Camera opened successfully. Press 'q' to exit.")
         
         try:
             while self.running:
+                # Read frame
                 ret, frame = cap.read()
                 if not ret:
                     print("Error: Failed to grab frame.")
                     break
                 
-                # Process the frame
-                processed_frame, roi, mask, detection = self.process_camera_frame(frame)
+                # Rotate the frame 180 degrees (if camera is upside down)
+                frame = cv2.rotate(frame, cv2.ROTATE_180)
                 
-                # Update camera data
-                self.camera_data["dart_mm_x"] = detection["dart_mm_x"]
-                self.camera_data["dart_angle"] = detection["dart_angle"]
+                # Draw ROI rectangle
+                cv2.rectangle(frame, (0, self.roi_top), (frame.shape[1], self.roi_bottom), (0, 255, 0), 2)
                 
-                # Log data for debugging
-                if detection["dart_angle"] is not None:
-                    # Add to lean history for smoothing
-                    self.lean_history.append(detection["dart_angle"])
-                    if len(self.lean_history) > self.max_lean_history:
-                        self.lean_history.pop(0)
+                # Extract ROI
+                roi = frame[self.roi_top:self.roi_bottom, :]
+                
+                # Apply background subtraction
+                gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+                fg_mask = self.bg_subtractor.apply(gray)
+                
+                # Threshold and clean up the mask
+                _, thresh = cv2.threshold(fg_mask, 180, 255, cv2.THRESH_BINARY)
+                kernel = np.ones((3, 3), np.uint8)
+                thresh = cv2.dilate(thresh, kernel, iterations=1)
+                
+                # Find contours
+                contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                
+                # Create a copy of ROI for visualization
+                roi_vis = roi.copy()
+                
+                # Find the largest contour (assumed to be the dart)
+                if contours:
+                    largest_contour = max(contours, key=cv2.contourArea)
                     
-                    # Calculate average lean
-                    avg_lean = sum(self.lean_history) / len(self.lean_history)
-                    self.current_side_lean_angle = avg_lean
+                    # Only process if contour is large enough
+                    if cv2.contourArea(largest_contour) > 30:
+                        # Draw contour
+                        cv2.drawContours(roi_vis, [largest_contour], -1, (0, 255, 0), 2)
+                        
+                        # Get dart center and angle
+                        center, angle = self.detect_dart_angle(largest_contour)
+                        
+                        if center is not None and angle is not None:
+                            # Calculate the center point adjusted to full frame coordinates
+                            center_x, center_y = int(center[0]), int(center[1])
+                            frame_center_y = center_y + self.roi_top
+                            
+                            # Draw the center point
+                            cv2.circle(roi_vis, (center_x, center_y), 5, (0, 0, 255), -1)
+                            
+                            # Calculate line endpoints based on the angle
+                            line_length = 50
+                            
+                            # Calculate the deviation from vertical
+                            deviation_deg = 90 - angle  # positive = leaning left, negative = leaning right
+                            deviation_rad = np.radians(deviation_deg)
+                            
+                            # Calculate line endpoints
+                            dx = line_length * np.sin(deviation_rad)
+                            dy = line_length * np.cos(deviation_rad)
+                            
+                            # Calculate endpoints
+                            start_x = int(center_x - dx)
+                            start_y = int(center_y - dy)
+                            end_x = int(center_x + dx)
+                            end_y = int(center_y + dy)
+                            
+                            # Draw the line through the dart
+                            cv2.line(roi_vis, (start_x, start_y), (end_x, end_y), (255, 0, 0), 2)
+                            
+                            # Determine lean direction
+                            lean_direction = "Vertical"
+                            if angle < 85:
+                                lean_direction = "Left"
+                            elif angle > 95:
+                                lean_direction = "Right"
+                                
+                            # Add text showing the angle
+                            cv2.putText(roi_vis, f"Angle: {angle:.1f}° ({lean_direction})", 
+                                       (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+                            
+                            # Also draw on the full frame
+                            frame_start_x = start_x
+                            frame_start_y = start_y + self.roi_top
+                            frame_end_x = end_x
+                            frame_end_y = end_y + self.roi_top
+                            
+                            # Draw extended line on full frame
+                            extension_factor = 3.0
+                            full_dx = dx * extension_factor
+                            full_dy = dy * extension_factor
+                            frame_ext_start_x = int(center_x - full_dx)
+                            frame_ext_start_y = int(center_y - full_dy) + self.roi_top
+                            frame_ext_end_x = int(center_x + full_dx)
+                            frame_ext_end_y = int(center_y + full_dy) + self.roi_top
+                            
+                            cv2.line(frame, (frame_ext_start_x, frame_ext_start_y), 
+                                    (frame_ext_end_x, frame_ext_end_y), (0, 0, 255), 2)
+                            
+                            # Add text to main frame
+                            cv2.putText(frame, f"Angle: {angle:.1f}° ({lean_direction})", 
+                                       (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                
+                # Copy ROI visualization back to the main frame
+                frame[self.roi_top:self.roi_bottom, :] = roi_vis
+                
+                # Also show the mask for debugging
+                mask_rgb = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
+                resized_mask = cv2.resize(mask_rgb, (320, 37))  # Half width, same height as ROI
+                frame[self.roi_bottom+10:self.roi_bottom+10+resized_mask.shape[0], 
+                      10:10+resized_mask.shape[1]] = resized_mask
+                
+                # Display the frame
+                cv2.imshow('Dart Angle Detection', frame)
+                
+                # Check for exit key
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
                     
-                    # Determine lean direction
-                    lean_direction = "Vertical"
-                    if avg_lean < 85:
-                        lean_direction = "LEFT"
-                    elif avg_lean > 95:
-                        lean_direction = "RIGHT"
-                    
-                    # Print information for debugging
-                    if self.debug_mode:
-                        print(f"Position: {detection['dart_mm_x']:.1f}mm, "
-                              f"Angle: {detection['dart_angle']:.1f}° (avg: {avg_lean:.1f}°), "
-                              f"Lean: {lean_direction}")
-                
-                # Show OpenCV windows if enabled
-                if self.show_opencv_windows:
-                    cv2.imshow("Camera Feed", processed_frame)
-                    cv2.imshow("ROI", roi)
-                    cv2.imshow("Mask", mask)
-                
-                # Update the plot with new data
-                self.update_plot((processed_frame, roi, mask, detection))
-                plt.pause(0.01)  # Give the GUI time to update
-                
-                # Handle keyboard input
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord('q'):
-                    self.running = False
-                elif key == ord('d'):
-                    self.debug_mode = not self.debug_mode
-                    print(f"Debug mode {'ON' if self.debug_mode else 'OFF'}")
-                elif key == ord('w'):
-                    self.show_opencv_windows = not self.show_opencv_windows
-                    if not self.show_opencv_windows:
-                        cv2.destroyAllWindows()
-        
         finally:
             cap.release()
             cv2.destroyAllWindows()
             print("Camera released.")
-    
-    def run(self):
-        """Start the detector"""
-        # Start camera processing
-        self.camera_loop()
 
 if __name__ == "__main__":
-    detector = SimpleCameraLeanDetector()
+    detector = SimpleDartDetector()
     detector.run()
