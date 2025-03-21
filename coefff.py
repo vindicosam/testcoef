@@ -9,6 +9,7 @@ import sys
 import cv2
 import time
 import os
+import json
 import matplotlib.image as mpimg
 import math
 
@@ -313,6 +314,22 @@ class LidarCameraVisualizer:
             "4_5": {"x_correction": -2.475, "y_correction": 6.135},
         }
 
+        # Calibration factors for lean correction
+        self.side_lean_max_adjustment = 6.0  # mm, maximum adjustment for side lean
+        self.forward_lean_max_adjustment = 4.0  # mm, maximum adjustment for forward lean
+        
+        # Coefficient strength scaling factors (per segment and ring)
+        self.coefficient_scaling = {}
+        
+        # Set default values for all segments (1-20)
+        for segment in range(1, 21):
+            self.coefficient_scaling[segment] = {
+                'doubles': 1.0,  # Scale for double ring
+                'trebles': 1.0,  # Scale for treble ring
+                'small': 1.0,    # Scale for inner single area (small segments)
+                'large': 1.0     # Scale for outer single area (large segments)
+            }
+
         # Running flag
         self.running = True
 
@@ -345,25 +362,6 @@ class LidarCameraVisualizer:
         # Maximum expected Y-difference for maximum lean (calibration parameter)
         self.MAX_Y_DIFF_FOR_MAX_LEAN = 4.0  # mm
         
-        # Calibration factors for lean correction
-        self.side_lean_max_adjustment = 6.0  # mm, maximum adjustment for side lean
-        self.forward_lean_max_adjustment = 4.0  # mm, maximum adjustment for forward lean
-        
-        # Coefficient strength scaling factors (per segment and ring)
-        self.coefficient_scaling = {
-            # Initialize with default scaling of 1.0 for all segments and rings
-            # Format: {segment_number: {'doubles': scale, 'trebles': scale, 'small': scale, 'large': scale}}
-        }
-        
-        # Set default values for all segments (1-20)
-        for segment in range(1, 21):
-            self.coefficient_scaling[segment] = {
-                'doubles': 1.0,  # Scale for double ring
-                'trebles': 1.0,  # Scale for treble ring
-                'small': 1.0,    # Scale for inner single area (small segments)
-                'large': 1.0     # Scale for outer single area (large segments)
-            }
-
         # Setup visualization
         self.setup_plot()
 
@@ -549,7 +547,6 @@ class LidarCameraVisualizer:
                 return True, name
         return False, None
 
-    # Replace the entire apply_calibration_correction method with this enhanced version:
     def apply_calibration_correction(self, x, y):
         """Apply improved calibration correction using weighted interpolation."""
         if not self.calibration_points:
@@ -582,15 +579,64 @@ class LidarCameraVisualizer:
         
         return x, y
 
+    def get_wire_proximity_factor(self, x, y):
+        """
+        Calculate a proximity factor (0.0 to 1.0) indicating how close a point is to a wire.
+        1.0 means directly on a wire, 0.0 means far from any wire.
+        
+        Args:
+            x: x-coordinate
+            y: y-coordinate
+            
+        Returns:
+            float: Proximity factor from 0.0 to 1.0
+        """
+        # Calculate distance from center
+        dist = math.sqrt(x*x + y*y)
+        
+        # Check proximity to circular wires (ring boundaries)
+        ring_wire_threshold = 5.0  # mm
+        min_ring_distance = float('inf')
+        for radius in [self.radii["bullseye"], self.radii["outer_bull"], 
+                      self.radii["inner_treble"], self.radii["outer_treble"],
+                      self.radii["inner_double"], self.radii["outer_double"]]:
+            ring_distance = abs(dist - radius)
+            min_ring_distance = min(min_ring_distance, ring_distance)
+        
+        # Check proximity to radial wires (segment boundaries)
+        segment_wire_threshold = 5.0  # mm
+        
+        # Calculate angle in degrees
+        angle_deg = math.degrees(math.atan2(y, x))
+        if angle_deg < 0:
+            angle_deg += 360
+        
+        # Check proximity to segment boundaries (every 18 degrees)
+        min_segment_distance = float('inf')
+        segment_boundary_degree = 9  # The first boundary is at 9 degrees, then every 18 degrees
+        for i in range(20):  # 20 segments
+            boundary_angle = (segment_boundary_degree + i * 18) % 360
+            angle_diff = min(abs(angle_deg - boundary_angle), 360 - abs(angle_deg - boundary_angle))
+            
+            # Convert angular difference to mm at this radius
+            linear_diff = angle_diff * math.pi / 180 * dist
+            min_segment_distance = min(min_segment_distance, linear_diff)
+        
+        # Get the minimum distance to any wire
+        min_wire_distance = min(min_ring_distance, min_segment_distance)
+        
+        # Convert to a factor from 0.0 to 1.0
+        # 1.0 means on the wire, 0.0 means at or beyond the threshold distance
+        if min_wire_distance >= ring_wire_threshold:
+            return 0.0
+        else:
+            return 1.0 - (min_wire_distance / ring_wire_threshold)
+
     def apply_segment_coefficients(self, x, y):
         """
-        Apply segment-specific coefficients based on the ring (area) of the dart.
-        The coefficients dictionaries are selected as follows:
-          - For inner single area (small area): use self.small_segment_coeff.
-          - For triple ring: use self.trebles_coeff.
-          - For outer single area (large area): use self.large_segment_coeff.
-          - For double ring: use self.doubles_coeff.
-        Bullseye and outer bull are left unmodified.
+        Apply segment-specific coefficients based on the ring (area) of the dart,
+        weighted by proximity to wires and segment-specific scaling factors.
+        Corrections are only applied to darts near wires.
         
         Args:
             x: x-coordinate of dart position
@@ -599,6 +645,13 @@ class LidarCameraVisualizer:
         Returns:
             Tuple of (corrected_x, corrected_y)
         """
+        # Get wire proximity factor (0.0 to 1.0)
+        wire_factor = self.get_wire_proximity_factor(x, y)
+        
+        # If far from any wire, return original position
+        if wire_factor <= 0.0:
+            return x, y
+        
         dist = math.sqrt(x*x + y*y)
         
         # No correction for bullseye and outer bull
@@ -612,33 +665,48 @@ class LidarCameraVisualizer:
         segment = int(((angle_deg + 9) % 360) / 18) + 1
         seg_str = str(segment)
 
-        # Choose coefficient dictionary based on ring
+        # Get the scaling factor specific to this segment and ring
+        ring_type = ""
+        
+        # Choose coefficient dictionary based on ring and set ring type for scaling
         if dist < self.radii["inner_treble"]:
             # Inner single area (small segment)
             coeff_dict = self.small_segment_coeff
+            ring_type = "small"
             # Try several candidate keys
             possible_keys = [f"{seg_str}_1", f"{seg_str}_0", f"{seg_str}_5", f"{seg_str}_4"]
         elif dist < self.radii["outer_treble"]:
             # Triple ring area
             coeff_dict = self.trebles_coeff
+            ring_type = "trebles"
             possible_keys = [f"{seg_str}_1", f"{seg_str}_5", f"{seg_str}_0", f"{seg_str}_3", f"{seg_str}_2"]
         elif dist < self.radii["inner_double"]:
             # Outer single area (large segment)
             coeff_dict = self.large_segment_coeff
+            ring_type = "large"
             possible_keys = [f"{seg_str}_5", f"{seg_str}_4", f"{seg_str}_0", f"{seg_str}_1"]
         elif dist < self.radii["outer_double"]:
             # Double ring area
             coeff_dict = self.doubles_coeff
+            ring_type = "doubles"
             possible_keys = [f"{seg_str}_1", f"{seg_str}_5", f"{seg_str}_0", f"{seg_str}_3"]
         else:
             # Outside board edge or miss, no correction
             return x, y
+            
+        # Get the segment-specific scaling factor for this ring type
+        scaling_factor = 1.0
+        if segment in self.coefficient_scaling and ring_type in self.coefficient_scaling[segment]:
+            scaling_factor = self.coefficient_scaling[segment][ring_type]
 
         # Look up the first matching key in the selected dictionary
         for key in possible_keys:
             if key in coeff_dict:
                 coeff = coeff_dict[key]
-                return x + coeff["x_correction"], y + coeff["y_correction"]
+                # Apply correction weighted by wire proximity factor AND segment-specific scaling
+                correction_factor = wire_factor * scaling_factor
+                return (x + (coeff["x_correction"] * correction_factor), 
+                        y + (coeff["y_correction"] * correction_factor))
         return x, y
 
     def detect_forward_backward_lean(self, lidar1_point, lidar2_point):
@@ -1276,7 +1344,6 @@ class LidarCameraVisualizer:
         lidar2_thread.join()
         camera_thread.join()
 
-    # Add the calibration_mode method here, right after the run method
     def calibration_mode(self):
         """Interactive calibration for LIDAR rotation and coefficient scaling."""
         print("Calibration Mode")
@@ -1387,6 +1454,7 @@ class LidarCameraVisualizer:
                     
             except ValueError:
                 print("Scale must be a numeric value")
+    
     def save_coefficient_scaling(self, filename="coefficient_scaling.json"):
         """Save the current coefficient scaling configuration to a JSON file."""
         try:
