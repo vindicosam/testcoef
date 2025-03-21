@@ -13,33 +13,36 @@ class DualCameraEpipolarTrainer:
         self.frame_height = 480
 
         # Camera 1 board plane line (y value in pixels where board surface is)
-        self.cam1_board_plane_y = 199
+        self.cam1_board_plane_y = 202
         # Allowed range around the board plane for detection
-        self.cam1_roi_range = 20
+        self.cam1_roi_range = 30
         # Camera 1 ROI calculated from board plane
         self.cam1_roi_top = self.cam1_board_plane_y - self.cam1_roi_range
         self.cam1_roi_bottom = self.cam1_board_plane_y + self.cam1_roi_range
         
         # Camera 2 board plane line (y value in pixels where board surface is)
-        self.cam2_board_plane_y = 195
+        self.cam2_board_plane_y = 199
         # Allowed range around the board plane for detection
-        self.cam2_roi_range = 20
+        self.cam2_roi_range = 30
         # Camera 2 ROI calculated from board plane
         self.cam2_roi_top = self.cam2_board_plane_y - self.cam2_roi_range
         self.cam2_roi_bottom = self.cam2_board_plane_y + self.cam2_roi_range
 
         # Calibration derived from provided data points
-        # For cam1: (0,0) -> x290, (-171,0) -> x506, (171,0) -> x68
+        # Updated with additional data points:
+        # For cam1: (0,0) -> x290, (-171,0) -> x506, (171,0) -> x68, (90,50) -> x151, 
+        #          (-20,103) -> x327, (20,-100) -> x277, (90,-50) -> x359
         self.camera1_pixel_to_mm_factor = -0.782  # Slope in mm/pixel
         self.camera1_pixel_offset = 226.8         # Board x when pixel_x = 0
         
-        # For cam2: (0,0) -> x307, (0,-171) -> x578, (0,171) -> x34
+        # For cam2: (0,0) -> x307, (0,-171) -> x578, (0,171) -> x34, (90,50) -> x249, 
+        #          (-20,103) -> x131, (20,-100) -> x459, (90,-50) -> x406
         self.camera2_pixel_to_mm_factor = -0.628  # Slope in mm/pixel
         self.camera2_pixel_offset = 192.8         # Board y when pixel_x = 0
 
         # Background subtractors
-        self.bg_subtractor1 = cv2.createBackgroundSubtractorMOG2(history=100, varThreshold=50, detectShadows=False)
-        self.bg_subtractor2 = cv2.createBackgroundSubtractorMOG2(history=100, varThreshold=50, detectShadows=False)
+        self.bg_subtractor1 = cv2.createBackgroundSubtractorMOG2(history=100, varThreshold=20, detectShadows=False)
+        self.bg_subtractor2 = cv2.createBackgroundSubtractorMOG2(history=100, varThreshold=20, detectShadows=False)
 
         # Camera indices
         self.cam_index1 = cam_index1
@@ -58,6 +61,28 @@ class DualCameraEpipolarTrainer:
         self.cam1_vector = None  # Vector from cam1 through detected point on board
         self.cam2_vector = None  # Vector from cam2 through detected point on board
         self.final_tip = None    # Intersection of the vectors
+        
+        # Known board segments with coordinates (added)
+        self.board_segments = {
+            4: (90, 50),
+            5: (-20, 103),
+            16: (90, -50),
+            17: (20, -100)
+        }
+        
+        # Calibration points for reference (added)
+        self.calibration_points = {
+            # Format: (board_x, board_y): (cam1_pixel_x, cam2_pixel_x)
+            (0, 0): (290, 307),
+            (-171, 0): (506, 307),
+            (171, 0): (68, 307),
+            (0, 171): (290, 34),
+            (0, -171): (290, 578),
+            (90, 50): (151, 249),
+            (-20, 103): (327, 131),
+            (20, -100): (277, 459),
+            (90, -50): (359, 406)
+        }
 
     def compute_line_intersection(self, p1, p2, p3, p4):
         """
@@ -86,7 +111,7 @@ class DualCameraEpipolarTrainer:
         contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         dart_pixel_x = None
         for contour in contours:
-            if cv2.contourArea(contour) > 50:
+            if cv2.contourArea(contour) > 20:
                 x, y, w, h = cv2.boundingRect(contour)
                 dart_pixel_x = x + w // 2
                 # Highlight the detected point
@@ -125,7 +150,7 @@ class DualCameraEpipolarTrainer:
         contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         dart_pixel_x = None
         for contour in contours:
-            if cv2.contourArea(contour) > 50:
+            if cv2.contourArea(contour) > 20:
                 x, y, w, h = cv2.boundingRect(contour)
                 dart_pixel_x = x + w // 2
                 # Highlight the detected point
@@ -164,7 +189,7 @@ class DualCameraEpipolarTrainer:
         
         # Convert board mm to image pixels (centered at the middle of the image)
         # Scale factor of 1.0 means 1mm = 1 pixel
-        scale_factor = 1.0
+        scale_factor = 0.5
         pixel_x = int(center_x + x * scale_factor)
         pixel_y = int(center_y - y * scale_factor)  # Y is inverted in image coordinates
         
@@ -200,7 +225,7 @@ class DualCameraEpipolarTrainer:
             board_size = int(self.board_radius * 2 * scale_factor)
             
             # Scale factor multiplier - increase this to make the dartboard larger relative to the boundary
-            image_scale_multiplier = 1.6  # Adjust this value to make the dartboard fill the boundary circle
+            image_scale_multiplier = 2.75  # Adjust this value to make the dartboard fill the boundary circle
             board_img_size = int(board_size * image_scale_multiplier)
             
             board_resized = cv2.resize(self.board_image, (board_img_size, board_img_size))
@@ -230,7 +255,7 @@ class DualCameraEpipolarTrainer:
         # Draw board boundary circle
         cv2.circle(canvas, (canvas_center_x, canvas_center_y), int(self.board_radius * scale_factor), (0, 0, 0), 1)
         
-        # Draw known segment markers for reference
+        # Draw known segment markers for reference (added)
         for segment, (x, y) in self.board_segments.items():
             segment_px = mm_to_canvas_px(x, y)
             cv2.circle(canvas, segment_px, 5, (128, 0, 128), -1)  # Purple dot
@@ -304,54 +329,13 @@ class DualCameraEpipolarTrainer:
             
             if self.final_tip is not None:
                 dart_x, dart_y = self.final_tip
+                final_px = mm_to_canvas_px(dart_x, dart_y)
                 
-                # Check if the dart position is reasonably within the board area (with some margin)
-                max_radius = self.board_radius * 1.2  # Allow detection slightly outside board
-                dart_radius = math.sqrt(dart_x**2 + dart_y**2)
-                
-                if dart_radius <= max_radius:
-                    # Add dart to history with current frame number
-                    self.dart_history.append((dart_x, dart_y))
-                    self.dart_lifetime[len(self.dart_history) - 1] = self.frame_counter + self.dart_persistence
-                    
-                    # Keep history at max size
-                    if len(self.dart_history) > self.max_history:
-                        # Remove oldest dart
-                        self.dart_history.pop(0)
-                        # Update keys in lifetime dictionary
-                        new_lifetime = {}
-                        for key, value in self.dart_lifetime.items():
-                            if key > 0:  # Skip the one we removed
-                                new_lifetime[key - 1] = value
-                        self.dart_lifetime = new_lifetime
-        
-        # Increment frame counter
-        self.frame_counter += 1
-        
-        # Draw all darts in history that are still within their lifetime
-        for i, (dart_x, dart_y) in enumerate(self.dart_history):
-            # Skip darts that have expired
-            if i not in self.dart_lifetime or self.frame_counter > self.dart_lifetime[i]:
-                continue
-                
-            final_px = mm_to_canvas_px(dart_x, dart_y)
-            
-            # Calculate alpha (transparency) based on remaining lifetime
-            # Fade out darts as they get closer to expiring
-            if i in self.dart_lifetime:
-                remaining_frames = self.dart_lifetime[i] - self.frame_counter
-                alpha = min(1.0, remaining_frames / (self.dart_persistence * 0.3))
-                alpha = max(0.3, alpha)  # Keep minimum visibility
-            else:
-                alpha = 0.5  # Default alpha for darts without lifetime
-            
-            # Latest dart gets highlighted
-            if i == len(self.dart_history) - 1 and self.final_tip is not None:
                 # Draw the intersection point
                 cv2.circle(canvas, final_px, 8, (0, 0, 0), -1)  # Black outline
                 cv2.circle(canvas, final_px, 6, (0, 255, 0), -1)  # Green center
                 
-                # Find closest segment
+                # Find closest segment (added)
                 closest_segment = None
                 min_distance = float('inf')
                 for segment, (seg_x, seg_y) in self.board_segments.items():
@@ -368,15 +352,9 @@ class DualCameraEpipolarTrainer:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
                 cv2.putText(canvas, label, (final_px[0]+10, final_px[1]), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
-            else:
-                # Color intensity based on alpha
-                intensity = int(255 * alpha)
-                color = (0, intensity, 0)
-                
-                # Draw older darts smaller and with transparency effect
-                cv2.circle(canvas, final_px, 6, (0, 0, 0), -1)  # Black outline
-                cv2.circle(canvas, final_px, 4, color, -1)  # Green center with alpha
-        
+        else:
+            self.final_tip = None
+
         return canvas
         
     def compute_intersection(self):
@@ -416,7 +394,7 @@ class DualCameraEpipolarTrainer:
         cap2.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
         cap2.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
 
-        print("Press 'q' to exit, 'c' to clear dart history.")
+        print("Press 'q' to exit.")
         while True:
             ret1, frame1 = cap1.read()
             ret2, frame2 = cap2.read()
@@ -434,14 +412,8 @@ class DualCameraEpipolarTrainer:
             cv2.imshow("Camera 2 FG Mask", fg_mask2)
             cv2.imshow("Board Projection", board_proj)
 
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord("q"):
+            if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
-            elif key == ord("c"):
-                # Clear dart history
-                print("Clearing dart history")
-                self.dart_history = []
-                self.dart_lifetime = {}
 
         cap1.release()
         cap2.release()
