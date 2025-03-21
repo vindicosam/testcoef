@@ -298,24 +298,29 @@ class SimpleCameraLeanDetector:
         # Calculate dart line points
         dart_length = 2.0  # Length of visualization line
         
-        # For accurate dart visualization, we need to reverse the direction
-        # since the physical dart lean should be mirrored in the visualization
+        # IMPORTANT: The visualization should directly match what we see in the camera
+        # If the dart is leaning left in the camera, the line should go left-down
+        # If the dart is leaning right in the camera, the line should go right-down
         
-        # Convert angle to lean direction (ensuring correct visual representation that MIRRORS the dart)
-        # For darts leaning left (angle < 90), we want the line to angle RIGHT (opposite)
-        # For darts leaning right (angle > 90), we want the line to angle LEFT (opposite)
-        if dart_angle < 90:
-            # Dart leaning left - line should angle rightward from base (mirror image)
-            lean_degrees = 90 - dart_angle  # How many degrees left of vertical
-            angle_rad = np.radians(lean_degrees)  # Positive to go right (mirroring)
-        else:
-            # Dart leaning right - line should angle leftward from base (mirror image)
-            lean_degrees = dart_angle - 90  # How many degrees right of vertical
-            angle_rad = np.radians(-lean_degrees)  # Negative to go left (mirroring)
-            
-        # Calculate endpoint
-        x_end = normalized_pos + dart_length * np.sin(angle_rad)
-        y_end = dart_length * np.cos(angle_rad)
+        # When a dart is leaning left (angle < 90), the line should go from (x,y) to (x-n,y-n) 
+        # When a dart is leaning right (angle > 90), the line should go from (x,y) to (x+n,y-n)
+        
+        # Calculate how much the dart deviates from vertical (in degrees)
+        deviation_degrees = 90 - dart_angle  # positive = lean left, negative = lean right
+        
+        # Convert to radians for trigonometry
+        deviation_rad = np.radians(deviation_degrees)
+        
+        # Calculate the x and y components of the line
+        # For a vertical dart (90°), sin(0) = 0, so x_offset = 0
+        # For a left-leaning dart (<90°), sin(+) = +, so x_offset < 0 (goes left)
+        # For a right-leaning dart (>90°), sin(-) = -, so x_offset > 0 (goes right)
+        x_offset = -dart_length * np.sin(deviation_rad)
+        y_offset = dart_length * np.cos(deviation_rad)
+        
+        # Calculate the endpoint of the line
+        x_end = normalized_pos + x_offset
+        y_end = y_offset
         
         # Update dart line visualization
         self.dart_line.set_data([normalized_pos, x_end], [0, y_end])
