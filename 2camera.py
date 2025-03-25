@@ -621,6 +621,36 @@ class LidarCameraVisualizer:
 
         return valid_points[0]
 
+    def load_coefficient_scaling(self):
+        """Load coefficient scaling values from a JSON file."""
+        try:
+            config_file = "coefficient_scaling.json"
+            if os.path.exists(config_file):
+                with open(config_file, 'r') as f:
+                    loaded_data = json.load(f)
+                    for segment, values in loaded_data.items():
+                        segment_num = int(segment)
+                        if 1 <= segment_num <= 20:
+                            for ring_type, scale in values.items():
+                                if ring_type in ['doubles', 'trebles', 'small', 'large']:
+                                    self.coefficient_scaling[segment_num][ring_type] = float(scale)
+                print("Coefficient scaling loaded from file.")
+            else:
+                print("No coefficient scaling file found. Using defaults.")
+        except Exception as e:
+            print(f"Error loading coefficient scaling: {e}")
+            print("Using default coefficient scaling values.")
+
+    def save_coefficient_scaling(self):
+        """Save coefficient scaling values to a JSON file."""
+        try:
+            config_file = "coefficient_scaling.json"
+            with open(config_file, 'w') as f:
+                json.dump(self.coefficient_scaling, f, indent=2)
+            print(f"Coefficient scaling saved to {config_file}")
+        except Exception as e:
+            print(f"Error saving coefficient scaling: {e}")
+
     def run(self, lidar1_script, lidar2_script):
         lidar1_thread = threading.Thread(target=self.start_lidar, args=(lidar1_script, self.lidar1_queue, 1))
         lidar2_thread = threading.Thread(target=self.start_lidar, args=(lidar2_script, self.lidar2_queue, 2))
