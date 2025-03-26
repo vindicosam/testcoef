@@ -1579,6 +1579,9 @@ if __name__ == "__main__":
     else:
         visualizer.run(lidar1_script, lidar2_script)
     
+    # Add this method to your LidarCameraVisualizer class
+# Copy this exactly as shown and add it right after the save_coefficient_scaling method
+
     def load_coefficient_scaling(self, filename="coefficient_scaling.json"):
         """Load coefficient scaling configuration from a JSON file."""
         try:
@@ -1593,6 +1596,9 @@ if __name__ == "__main__":
             else:
                 print(f"Scaling file {filename} not found, using defaults")
                 return False
+    except Exception as e:
+        print(f"Error loading coefficient scaling: {e}")
+        return False
         except Exception as e:
             print(f"Error loading coefficient scaling: {e}")
             return False
