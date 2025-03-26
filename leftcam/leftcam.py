@@ -88,28 +88,230 @@ class LidarCameraVisualizer:
         self.large_segment_coeff = {
             "14_5": {"x_correction": -1.888, "y_correction": 12.790},
             "11_4": {"x_correction": -6.709, "y_correction": 14.045},
-            # ... (keeping the same coefficients as original script)
+            "11_0": {"x_correction": -6.605, "y_correction": 13.916},
+            "11_5": {"x_correction": -5.090, "y_correction": 11.821},
+            "11_1": {"x_correction": -4.847, "y_correction": 11.024},
+            "8_0": {"x_correction": -6.395, "y_correction": 13.293},
+            "7_0": {"x_correction": -9.691, "y_correction": 12.377},
+            "7_1": {"x_correction": -9.591, "y_correction": 11.792},
+            "8_1": {"x_correction": -6.213, "y_correction": 11.840},
+            "16_1": {"x_correction": -10.269, "y_correction": 11.723},
+            "2_1": {"x_correction": -4.985, "y_correction": 10.641},
+            "8_4": {"x_correction": -8.981, "y_correction": 11.649},
+            "14_1": {"x_correction": -1.723, "y_correction": 10.927},
+            "8_5": {"x_correction": -4.535, "y_correction": 11.181},
+            "3_1": {"x_correction": -8.918, "y_correction": 10.807},
+            "9_0": {"x_correction": -3.342, "y_correction": 7.611},
+            "16_5": {"x_correction": -10.830, "y_correction": 10.470},
+            "17_0": {"x_correction": -8.497, "y_correction": 8.977},
+            "16_0": {"x_correction": -8.224, "y_correction": 8.937},
+            "19_1": {"x_correction": -10.042, "y_correction": 8.801},
+            "4_5": {"x_correction": -4.686, "y_correction": 8.744},
+            "19_5": {"x_correction": -10.075, "y_correction": 8.604},
+            "12_4": {"x_correction": -0.499, "y_correction": 8.492},
+            "19_4": {"x_correction": -13.455, "y_correction": 8.033},
+            "14_4": {"x_correction": -1.960, "y_correction": 7.888},
+            "3_5": {"x_correction": -10.917, "y_correction": 7.779},
+            "17_5": {"x_correction": -9.926, "y_correction": 5.224},
+            "6_1": {"x_correction": -5.905, "y_correction": 7.375},
+            "14_0": {"x_correction": -0.637, "y_correction": 7.264},
+            "15_1": {"x_correction": -7.194, "y_correction": 6.566},
+            "5_5": {"x_correction": -2.309, "y_correction": 5.927},
+            "6_0": {"x_correction": -7.530, "y_correction": 5.270},
+            "10_1": {"x_correction": -9.194, "y_correction": 6.558},
+            "12_1": {"x_correction": -1.734, "y_correction": 4.059},
+            "12_0": {"x_correction": -3.338, "y_correction": 6.216},
+            "19_0": {"x_correction": -9.766, "y_correction": 6.125},
+            "9_4": {"x_correction": -1.636, "y_correction": 4.641},
+            "5_4": {"x_correction": -8.349, "y_correction": 5.671},
+            "9_1": {"x_correction": -1.606, "y_correction": 5.520},
+            "2_5": {"x_correction": -7.027, "y_correction": 4.896},
+            "18_1": {"x_correction": -3.413, "y_correction": 4.881},
+            "13_1": {"x_correction": -5.517, "y_correction": 3.166},
+            "1_0": {"x_correction": -0.407, "y_correction": 4.015},
+            "10_0": {"x_correction": -7.208, "y_correction": 3.562},
+            "17_4": {"x_correction": -8.488, "y_correction": 4.264},
+            "15_0": {"x_correction": -7.664, "y_correction": 3.148},
+            "1_5": {"x_correction": -0.208, "y_correction": 3.515},
+            "9_5": {"x_correction": -1.443, "y_correction": 4.024},
+            "4_4": {"x_correction": 3.680, "y_correction": 3.977},
+            "13_0": {"x_correction": -7.877, "y_correction": 3.825},
+            "18_5": {"x_correction": -1.150, "y_correction": 2.951},
+            "20_0": {"x_correction": -0.209, "y_correction": 3.703},
+            "20_4": {"x_correction": 0.030, "y_correction": 3.679},
+            "1_1": {"x_correction": 0.153, "y_correction": 3.588},
+            "13_4": {"x_correction": -1.385, "y_correction": 3.558},
+            "6_4": {"x_correction": -4.651, "y_correction": 3.224},
+            "18_0": {"x_correction": 0.445, "y_correction": 3.093},
+            "20_5": {"x_correction": 3.307, "y_correction": 1.799},
+            "20_1": {"x_correction": 1.100, "y_correction": 2.753},
+            "4_1": {"x_correction": -3.415, "y_correction": 3.065},
+            "6_5": {"x_correction": -5.995, "y_correction": 2.865},
+            "3_4": {"x_correction": -8.063, "y_correction": 2.598},
+            "5_1": {"x_correction": -1.836, "y_correction": 2.499},
+            "18_4": {"x_correction": -0.437, "y_correction": 2.494},
+            "12_5": {"x_correction": -2.815, "y_correction": 1.152},
+            "4_0": {"x_correction": -2.765, "y_correction": 1.995},
+            "15_5": {"x_correction": -2.276, "y_correction": 1.083},
+            "1_4": {"x_correction": -3.322, "y_correction": 1.726},
+            "13_5": {"x_correction": -2.024, "y_correction": 0.790},
+            "10_4": {"x_correction": -4.923, "y_correction": 0.783},
+            "5_0": {"x_correction": -2.016, "y_correction": 0.725},
+            "2_4": {"x_correction": -0.837, "y_correction": 0.118},
+            "10_5": {"x_correction": -3.798, "y_correction": -0.596}
         }
         
         # Coefficients for the double ring area
         self.doubles_coeff = {
             "1_1": {"x_correction": 3.171, "y_correction": 0.025},
             "14_5": {"x_correction": 1.920, "y_correction": 6.191},
-            # ... (keeping the same coefficients as original script)
+            "20_1": {"x_correction": 1.812, "y_correction": 1.691},
+            "20_5": {"x_correction": 0.901, "y_correction": -0.772},
+            "5_1": {"x_correction": 1.289, "y_correction": 2.309},
+            "12_1": {"x_correction": -0.341, "y_correction": 2.428},
+            "13_1": {"x_correction": -0.154, "y_correction": -2.869},
+            "12_3": {"x_correction": 0.892, "y_correction": 1.668},
+            "1_5": {"x_correction": 0.508, "y_correction": -2.633},
+            "12_5": {"x_correction": 0.714, "y_correction": 0.641},
+            "18_1": {"x_correction": 0.398, "y_correction": 0.107},
+            "5_5": {"x_correction": 0.447, "y_correction": -0.214},
+            "11_5": {"x_correction": 0.024, "y_correction": 10.893},
+            "9_1": {"x_correction": -3.442, "y_correction": 4.916},
+            "14_1": {"x_correction": -0.489, "y_correction": 11.128},
+            "18_5": {"x_correction": -2.239, "y_correction": -0.348},
+            "11_1": {"x_correction": -2.255, "y_correction": 11.938},
+            "15_1": {"x_correction": -2.844, "y_correction": 5.225},
+            "1_0": {"x_correction": -1.988, "y_correction": 0.472},
+            "9_5": {"x_correction": -3.420, "y_correction": 3.773},
+            "4_0": {"x_correction": -2.919, "y_correction": 9.090},
+            "8_5": {"x_correction": -3.642, "y_correction": 14.419},
+            "6_1": {"x_correction": -3.798, "y_correction": -2.819},
+            "6_0": {"x_correction": -3.986, "y_correction": 0.326},
+            "4_1": {"x_correction": -4.062, "y_correction": -0.001},
+            "4_5": {"x_correction": -4.586, "y_correction": 2.522},
+            "10_1": {"x_correction": -5.709, "y_correction": 0.317},
+            "15_5": {"x_correction": -4.602, "y_correction": 6.307},
+            "13_3": {"x_correction": -5.236, "y_correction": -2.793},
+            "2_5": {"x_correction": -6.853, "y_correction": 4.826},
+            "13_5": {"x_correction": -6.011, "y_correction": -0.742},
+            "19_0": {"x_correction": -6.175, "y_correction": 7.132},
+            "8_1": {"x_correction": -6.521, "y_correction": 12.622},
+            "2_1": {"x_correction": -6.639, "y_correction": 4.853},
+            "16_4": {"x_correction": -6.744, "y_correction": 10.677},
+            "6_5": {"x_correction": -8.855, "y_correction": 1.088},
+            "8_3": {"x_correction": -7.429, "y_correction": 12.300},
+            "17_1": {"x_correction": -10.417, "y_correction": 2.648},
+            "17_5": {"x_correction": -9.882, "y_correction": 9.256},
+            "10_5": {"x_correction": -10.464, "y_correction": 2.446},
+            "3_1": {"x_correction": -12.581, "y_correction": 8.704}
         }
         
         # Coefficients for the triple ring area (trebles)
         self.trebles_coeff = {
             "1_1": {"x_correction": 3.916, "y_correction": 7.238},
             "1_5": {"x_correction": 2.392, "y_correction": 0.678},
-            # ... (keeping the same coefficients as original script)
+            "20_5": {"x_correction": 0.486, "y_correction": 4.293},
+            "12_5": {"x_correction": -3.547, "y_correction": 6.943},
+            "9_5": {"x_correction": -2.731, "y_correction": 6.631},
+            "5_3": {"x_correction": 0.329, "y_correction": 6.408},
+            "18_5": {"x_correction": -0.707, "y_correction": 0.318},
+            "6_5": {"x_correction": -3.776, "y_correction": 0.478},
+            "5_4": {"x_correction": -0.643, "y_correction": 5.413},
+            "20_4": {"x_correction": -1.589, "y_correction": 4.333},
+            "4_5": {"x_correction": -2.487, "y_correction": -0.736},
+            "1_4": {"x_correction": -2.523, "y_correction": 5.148},
+            "1_3": {"x_correction": -1.564, "y_correction": 4.005},
+            "11_4": {"x_correction": -1.692, "y_correction": 12.002},
+            "4_4": {"x_correction": -2.392, "y_correction": 5.377},
+            "18_2": {"x_correction": -2.261, "y_correction": 2.238},
+            "15_4": {"x_correction": -4.329, "y_correction": 6.308},
+            "14_5": {"x_correction": -4.835, "y_correction": 9.586},
+            "13_5": {"x_correction": -3.615, "y_correction": 2.233},
+            "15_3": {"x_correction": -2.650, "y_correction": -0.747},
+            "14_3": {"x_correction": -2.933, "y_correction": 10.375},
+            "5_5": {"x_correction": -3.065, "y_correction": 5.476},
+            "13_2": {"x_correction": -3.526, "y_correction": 5.453},
+            "2_4": {"x_correction": -3.536, "y_correction": 2.872},
+            "18_4": {"x_correction": -3.965, "y_correction": 2.129},
+            "10_2": {"x_correction": -4.432, "y_correction": -3.304},
+            "11_5": {"x_correction": -7.210, "y_correction": 9.992},
+            "16_4": {"x_correction": -4.816, "y_correction": 6.071},
+            "10_4": {"x_correction": -6.640, "y_correction": 4.376},
+            "8_5": {"x_correction": -5.485, "y_correction": 11.023},
+            "6_2": {"x_correction": -5.893, "y_correction": 5.692},
+            "13_4": {"x_correction": -6.091, "y_correction": 5.513},
+            "6_4": {"x_correction": -6.493, "y_correction": 2.749},
+            "8_3": {"x_correction": -6.553, "y_correction": 10.721},
+            "15_5": {"x_correction": -7.578, "y_correction": 5.281},
+            "17_4": {"x_correction": -7.701, "y_correction": 4.141},
+            "9_4": {"x_correction": -7.743, "y_correction": 5.096},
+            "10_3": {"x_correction": -7.774, "y_correction": 0.795},
+            "2_5": {"x_correction": -9.829, "y_correction": 7.675},
+            "2_3": {"x_correction": -9.342, "y_correction": 4.183},
+            "17_3": {"x_correction": -9.878, "y_correction": 8.301},
+            "7_5": {"x_correction": -10.593, "y_correction": 11.340},
+            "3_2": {"x_correction": -10.107, "y_correction": 10.510},
+            "19_2": {"x_correction": -10.599, "y_correction": 5.780},
+            "10_5": {"x_correction": -10.654, "y_correction": 2.223},
+            "7_3": {"x_correction": -10.696, "y_correction": 11.291},
+            "16_3": {"x_correction": -11.650, "y_correction": 8.589},
+            "3_3": {"x_correction": -12.353, "y_correction": 8.187}
         }
         
         # Coefficients for the inner single area (small segments)
         self.small_segment_coeff = {
             "8_5": {"x_correction": -7.021, "y_correction": 9.646},
             "5_1": {"x_correction": -2.830, "y_correction": 9.521},
-            # ... (keeping the same coefficients as original script)
+            "11_5": {"x_correction": -6.008, "y_correction": 10.699},
+            "2_5": {"x_correction": -6.268, "y_correction": 7.615},
+            "20_1": {"x_correction": 0.963, "y_correction": 10.550},
+            "14_4": {"x_correction": -5.388, "y_correction": 8.898},
+            "9_4": {"x_correction": -5.635, "y_correction": 8.149},
+            "12_0": {"x_correction": -6.959, "y_correction": 10.260},
+            "16_5": {"x_correction": -11.642, "y_correction": 10.048},
+            "14_5": {"x_correction": -4.386, "y_correction": 10.033},
+            "3_4": {"x_correction": -7.878, "y_correction": 9.123},
+            "19_4": {"x_correction": -8.770, "y_correction": 9.305},
+            "17_5": {"x_correction": -8.988, "y_correction": 9.779},
+            "5_5": {"x_correction": 1.819, "y_correction": 9.487},
+            "9_0": {"x_correction": -4.911, "y_correction": 7.613},
+            "4_1": {"x_correction": -1.519, "y_correction": 8.133},
+            "7_4": {"x_correction": -11.424, "y_correction": 9.196},
+            "16_4": {"x_correction": -10.080, "y_correction": 8.196},
+            "12_5": {"x_correction": -1.101, "y_correction": 8.018},
+            "14_0": {"x_correction": -6.371, "y_correction": 8.618},
+            "20_4": {"x_correction": -2.488, "y_correction": 7.384},
+            "18_0": {"x_correction": 0.999, "y_correction": 7.666},
+            "12_1": {"x_correction": -2.311, "y_correction": 7.972},
+            "11_1": {"x_correction": -5.123, "y_correction": 8.361},
+            "7_5": {"x_correction": -10.936, "y_correction": 8.215},
+            "1_0": {"x_correction": -1.665, "y_correction": 8.301},
+            "1_1": {"x_correction": 1.706, "y_correction": 8.171},
+            "17_4": {"x_correction": -10.220, "y_correction": 7.089},
+            "19_5": {"x_correction": -9.638, "y_correction": 8.098},
+            "8_1": {"x_correction": -6.475, "y_correction": 7.005},
+            "18_5": {"x_correction": -1.040, "y_correction": 5.177},
+            "18_1": {"x_correction": -0.922, "y_correction": 6.026},
+            "6_4": {"x_correction": 0.032, "y_correction": 7.757},
+            "10_0": {"x_correction": -0.047, "y_correction": 4.356},
+            "1_5": {"x_correction": -1.026, "y_correction": 7.089},
+            "7_0": {"x_correction": -2.914, "y_correction": 6.025},
+            "19_0": {"x_correction": -4.016, "y_correction": 6.535},
+            "3_1": {"x_correction": -3.210, "y_correction": 7.153},
+            "11_4": {"x_correction": -5.380, "y_correction": 7.119},
+            "6_0": {"x_correction": -0.378, "y_correction": 4.360},
+            "15_1": {"x_correction": -2.137, "y_correction": 5.343},
+            "2_1": {"x_correction": -3.566, "y_correction": 6.891},
+            "13_5": {"x_correction": -1.611, "y_correction": 5.200},
+            "8_0": {"x_correction": -5.113, "y_correction": 6.868},
+            "10_4": {"x_correction": -5.279, "y_correction": 4.516},
+            "18_4": {"x_correction": -1.608, "y_correction": 6.575},
+            "16_0": {"x_correction": -2.293, "y_correction": 6.462},
+            "4_0": {"x_correction": -1.653, "y_correction": 6.338},
+            "5_4": {"x_correction": -2.519, "y_correction": 4.993},
+            "12_4": {"x_correction": -3.529, "y_correction": 6.306},
+            "13_4": {"x_correction": -2.516, "y_correction": 5.167},
+            "4_5": {"x_correction": -2.475, "y_correction": 6.135}
         }
 
         # Calibration factors for lean correction
@@ -933,7 +1135,7 @@ class LidarCameraVisualizer:
             if hasattr(self, 'arrow_text') and self.arrow_text is not None:
                 self.arrow_text.remove()
                 self.arrow_text = None
-
+                
     def update_plot(self, frame):
         """Update plot data with enhanced 3D lean correction."""
         x1, y1 = [], []
@@ -1208,7 +1410,7 @@ class LidarCameraVisualizer:
         return (self.scatter1, self.scatter2, self.camera_vector, self.detected_dart,
                 self.lidar1_vector, self.lidar2_vector, self.camera_dart, 
                 self.lidar1_dart, self.lidar2_dart)
-
+                
     def run(self, lidar1_script, lidar2_script):
         """Start all components."""
         lidar1_thread = threading.Thread(target=self.start_lidar, args=(lidar1_script, self.lidar1_queue, 1))
@@ -1271,64 +1473,6 @@ class LidarCameraVisualizer:
             except:
                 print("Invalid command format")
     
-    def save_coefficient_scaling(self, filename="coefficient_scaling.json"):
-        """Save the current coefficient scaling configuration to a JSON file."""
-        try:
-            with open(filename, 'w') as f:
-                json.dump(self.coefficient_scaling, f, indent=2)
-            print(f"Coefficient scaling saved to {filename}")
-            return True
-        except Exception as e:
-            print(f"Error saving coefficient scaling: {e}")
-            return False
-    
-    def load_coefficient_scaling(self, filename="coefficient_scaling.json"):
-        """Load coefficient scaling configuration from a JSON file."""
-        try:
-            if os.path.exists(filename):
-                with open(filename, 'r') as f:
-                    loaded_scaling = json.load(f)
-                    
-                # Convert string keys back to integers
-                self.coefficient_scaling = {int(k): v for k, v in loaded_scaling.items()}
-                print(f"Coefficient scaling loaded from {filename}")
-                return True
-            else:
-                print(f"Scaling file {filename} not found, using defaults")
-                return False
-        except Exception as e:
-            print(f"Error loading coefficient scaling: {e}")
-            return False
-            
-    def save_coefficient_scaling(self, filename="coefficient_scaling.json"):
-        """Save the current coefficient scaling configuration to a JSON file."""
-        try:
-            with open(filename, 'w') as f:
-                json.dump(self.coefficient_scaling, f, indent=2)
-            print(f"Coefficient scaling saved to {filename}")
-            return True
-        except Exception as e:
-            print(f"Error saving coefficient scaling: {e}")
-            return False
-    
-    def load_coefficient_scaling(self, filename="coefficient_scaling.json"):
-        """Load coefficient scaling configuration from a JSON file."""
-        try:
-            if os.path.exists(filename):
-                with open(filename, 'r') as f:
-                    loaded_scaling = json.load(f)
-                    
-                # Convert string keys back to integers
-                self.coefficient_scaling = {int(k): v for k, v in loaded_scaling.items()}
-                print(f"Coefficient scaling loaded from {filename}")
-                return True
-            else:
-                print(f"Scaling file {filename} not found, using defaults")
-                return False
-        except Exception as e:
-            print(f"Error loading coefficient scaling: {e}")
-            return False
-            
     def _calibrate_coefficient_scaling(self):
         """Interactive calibration for coefficient scaling factors."""
         print("Coefficient Scaling Calibration Mode")
@@ -1397,6 +1541,432 @@ class LidarCameraVisualizer:
                     
             except ValueError:
                 print("Scale must be a numeric value")
+    
+    def save_coefficient_scaling(self, filename="coefficient_scaling.json"):
+        """Save the current coefficient scaling configuration to a JSON file."""
+        try:
+            with open(filename, 'w') as f:
+                json.dump(self.coefficient_scaling, f, indent=2)
+            print(f"Coefficient scaling saved to {filename}")
+            return True
+        except Exception as e:
+            print(f"Error saving coefficient scaling: {e}")
+            return False
+
+if __name__ == "__main__":
+    lidar1_script = "./tri_test_lidar1"
+    lidar2_script = "./tri_test_lidar2"
+    visualizer = LidarCameraVisualizer()
+    
+    # Try to load coefficient scaling from file
+    visualizer.load_coefficient_scaling()
+    
+    # Parse command line arguments
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--calibrate":
+            visualizer.calibration_mode()
+            # After calibration, ask to save settings
+            save = input("Save coefficient scaling settings? (y/n): ")
+            if save.lower() == 'y':
+                visualizer.save_coefficient_scaling()
+        elif sys.argv[1] == "--help":
+            print("Usage:")
+            print("  python script.py                  - Run the program normally")
+            print("  python script.py --calibrate      - Enter calibration mode")
+            print("  python script.py --help           - Show this help message")
+            print("\nNote: This version has been modified for a camera on the left side")
+            print("      of the board instead of at the top.")
+    else:
+        visualizer.run(lidar1_script, lidar2_script)
+    
+    def load_coefficient_scaling(self, filename="coefficient_scaling.json"):
+        """Load coefficient scaling configuration from a JSON file."""
+        try:
+            if os.path.exists(filename):
+                with open(filename, 'r') as f:
+                    loaded_scaling = json.load(f)
+                    
+                # Convert string keys back to integers
+                self.coefficient_scaling = {int(k): v for k, v in loaded_scaling.items()}
+                print(f"Coefficient scaling loaded from {filename}")
+                return True
+            else:
+                print(f"Scaling file {filename} not found, using defaults")
+                return False
+        except Exception as e:
+            print(f"Error loading coefficient scaling: {e}")
+            return False
+            if hasattr(self, 'lean_arrow') and self.lean_arrow is not None:
+                self.lean_arrow.remove()
+            self.lean_arrow = self.ax.arrow(
+                0, 0, arrow_dx, arrow_dy, 
+                width=3, head_width=10, head_length=10, 
+                fc='purple', ec='purple', alpha=0.7
+            )
+            
+            # Add text label near arrow
+            if hasattr(self, 'arrow_text') and self.arrow_text is not None:
+                self.arrow_text.remove()
+            self.arrow_text = self.ax.text(
+                arrow_dx/2, arrow_dy/2, 
+                f"{abs(up_down_lean_angle):.1f}°", 
+                color='purple', fontsize=9, 
+                ha='center', va='center'
+            )
+        else:
+            # Remove arrow if lean not detected with confidence
+            if hasattr(self, 'lean_arrow') and self.lean_arrow is not None:
+                self.lean_arrow.remove()
+                self.lean_arrow = None
+            if hasattr(self, 'arrow_text') and self.arrow_text is not None:
+                self.arrow_text.remove()
+                self.arrow_text = None
+                
+    def update_plot(self, frame):
+        """Update plot data with enhanced 3D lean correction."""
+        x1, y1 = [], []
+        x2, y2 = [], []
+        
+        # Track the most significant LIDAR points for vector visualization
+        lidar1_most_significant = None
+        lidar2_most_significant = None
+        
+        # Process LIDAR 1 data
+        while not self.lidar1_queue.empty():
+            angle, distance = self.lidar1_queue.get()
+            x, y = self.polar_to_cartesian(angle, distance - self.lidar1_offset, 
+                                         self.lidar1_pos, self.lidar1_rotation, self.lidar1_mirror)
+            
+            if x is not None:
+                is_valid, zone = self.filter_points_by_radii(x, y)
+                if is_valid:
+                    # Store point for recent history
+                    self.lidar1_recent_points.append((x, y))
+                    if len(self.lidar1_recent_points) > self.max_recent_points:
+                        self.lidar1_recent_points.pop(0)
+                    
+                    x1.append(x)
+                    y1.append(y)
+                    
+                    # Update most significant point (closest to center)
+                    dist_from_center = np.sqrt(x**2 + y**2)
+                    if lidar1_most_significant is None or dist_from_center < lidar1_most_significant[2]:
+                        lidar1_most_significant = (x, y, dist_from_center)
+                        
+        # Process LIDAR 2 data
+        while not self.lidar2_queue.empty():
+            angle, distance = self.lidar2_queue.get()
+            x, y = self.polar_to_cartesian(angle, distance - self.lidar2_offset, 
+                                         self.lidar2_pos, self.lidar2_rotation, self.lidar2_mirror)
+            
+            if x is not None:
+                is_valid, zone = self.filter_points_by_radii(x, y)
+                if is_valid:
+                    # Store point for recent history
+                    self.lidar2_recent_points.append((x, y))
+                    if len(self.lidar2_recent_points) > self.max_recent_points:
+                        self.lidar2_recent_points.pop(0)
+                    
+                    x2.append(x)
+                    y2.append(y)
+                    
+                    # Update most significant point (closest to center)
+                    dist_from_center = np.sqrt(x**2 + y**2)
+                    if lidar2_most_significant is None or dist_from_center < lidar2_most_significant[2]:
+                        lidar2_most_significant = (x, y, dist_from_center)
+
+        # Calculate LIDAR average positions if enough data
+        lidar1_avg = None
+        lidar2_avg = None
+        
+        if len(self.lidar1_recent_points) > 0:
+            avg_x = sum(p[0] for p in self.lidar1_recent_points) / len(self.lidar1_recent_points)
+            avg_y = sum(p[1] for p in self.lidar1_recent_points) / len(self.lidar1_recent_points)
+            lidar1_avg = (avg_x, avg_y)
+            
+        if len(self.lidar2_recent_points) > 0:
+            avg_x = sum(p[0] for p in self.lidar2_recent_points) / len(self.lidar2_recent_points)
+            avg_y = sum(p[1] for p in self.lidar2_recent_points) / len(self.lidar2_recent_points)
+            lidar2_avg = (avg_x, avg_y)
+        
+        # Get camera data and side-to-side lean angle
+        camera_y = self.camera_data.get("dart_mm_y")
+        side_lean_angle = self.camera_data.get("dart_angle", 90)  # Default to vertical if unknown
+        
+        # Calculate up/down lean angle using both LIDARs if available
+        up_down_lean_angle = 0
+        lean_confidence = 0
+        if lidar1_avg is not None and lidar2_avg is not None:
+            up_down_lean_angle, lean_confidence = self.detect_up_down_lean(lidar1_avg, lidar2_avg)
+            
+            # Add to lean history for smoothing
+            self.lean_history.append((up_down_lean_angle, lean_confidence))
+            if len(self.lean_history) > self.max_lean_history:
+                self.lean_history.pop(0)
+                
+            # Calculate weighted average of lean angles (higher confidence = higher weight)
+            if self.lean_history:
+                total_weight = sum(conf for _, conf in self.lean_history)
+                if total_weight > 0:
+                    smoothed_lean = sum(angle * conf for angle, conf in self.lean_history) / total_weight
+                    up_down_lean_angle = smoothed_lean
+                    
+            # Update current values for visualization
+            self.current_up_down_lean_angle = up_down_lean_angle
+            self.up_down_lean_confidence = lean_confidence
+        
+        # Calculate intersection of camera vector with board surface
+        self.camera_board_intersection = self.find_camera_board_intersection(camera_y)
+        
+        # Project LIDAR points accounting for both side-to-side and up/down lean
+        self.lidar1_projected_point = None
+        self.lidar2_projected_point = None
+        
+        if lidar1_avg is not None:
+            self.lidar1_projected_point = self.project_lidar_point_with_3d_lean(
+                lidar1_avg, self.lidar1_height, side_lean_angle, up_down_lean_angle, camera_y)
+                
+        if lidar2_avg is not None:
+            self.lidar2_projected_point = self.project_lidar_point_with_3d_lean(
+                lidar2_avg, self.lidar2_height, side_lean_angle, up_down_lean_angle, camera_y)
+        
+        # If camera has no data, don't adjust LIDAR points for side-to-side lean
+        # but still adjust for up/down lean if detected
+        if camera_y is None and lidar1_avg is not None and lidar2_avg is not None:
+            self.lidar1_projected_point = self.project_lidar_point_with_3d_lean(
+                lidar1_avg, self.lidar1_height, 90, up_down_lean_angle, None)
+            self.lidar2_projected_point = self.project_lidar_point_with_3d_lean(
+                lidar2_avg, self.lidar2_height, 90, up_down_lean_angle, None)
+        
+        # Calculate final tip position using all available data with enhanced 3D lean correction
+        final_tip_position = self.calculate_final_tip_position(
+            self.camera_board_intersection, 
+            self.lidar1_projected_point,
+            self.lidar2_projected_point
+        )
+        
+        # Apply calibration correction to final tip position
+        if final_tip_position is not None:
+            final_tip_position = self.apply_calibration_correction(
+                final_tip_position[0], final_tip_position[1])
+                
+            # Also apply segment-specific coefficients
+            final_tip_position = self.apply_segment_coefficients(
+                final_tip_position[0], final_tip_position[1])
+            
+            # Update detected dart position
+            self.detected_dart.set_data([final_tip_position[0]], [final_tip_position[1]])
+            
+            # Check which zone the dart is in
+            distance_from_center = np.sqrt(final_tip_position[0]**2 + final_tip_position[1]**2)
+            detected_zone = None
+            for name, radius in self.radii.items():
+                if distance_from_center <= radius:
+                    detected_zone = name
+                    break
+            
+            # Handle None values for lean angles before printing
+            if side_lean_angle is None:
+                side_lean_angle = 90.0  # Default to vertical
+            if up_down_lean_angle is None:
+                up_down_lean_angle = 0.0
+            if lean_confidence is None:
+                lean_confidence = 0.0
+                    
+            # Print detailed dart information with lean angles
+            print(f"Dart detected - X: {final_tip_position[0]:.1f}, Y: {final_tip_position[1]:.1f}, "
+                  f"Zone: {detected_zone if detected_zone else 'Outside'}")
+            print(f"Side lean: {side_lean_angle:.1f}° (90° = vertical), "
+                  f"Up/Down lean: {up_down_lean_angle:.1f}° (conf: {lean_confidence:.2f})")
+        else:
+            self.detected_dart.set_data([], [])
+        
+        # Update the lean visualization
+        self.update_lean_visualization(side_lean_angle, up_down_lean_angle, lean_confidence)
+            
+        # Update camera visualization
+        if self.camera_board_intersection is not None:
+            # Calculate direction vector from camera to intersection
+            camera_x = self.camera_position[0]
+            camera_y = self.camera_board_intersection[1]
+            
+            # Calculate unit vector from camera to intersection
+            dx = 0 - camera_x  # The x coordinate is 0 since the dart is on the board plane
+            dy = camera_y - self.camera_position[1]
+            length = np.sqrt(dx**2 + dy**2)
+            
+            if length > 0:
+                # Normalize and scale to vector length
+                unit_x = dx / length
+                unit_y = dy / length
+                vector_end_x = self.camera_position[0] + self.camera_vector_length * unit_x
+                vector_end_y = self.camera_position[1] + self.camera_vector_length * unit_y
+                
+                # Draw camera vector and intersection point
+                self.camera_vector.set_data(
+                    [self.camera_position[0], vector_end_x],
+                    [self.camera_position[1], vector_end_y]
+                )
+                self.camera_dart.set_data([0], [camera_y])  # x coordinate is 0 for board plane
+            else:
+                self.camera_vector.set_data([], [])
+                self.camera_dart.set_data([], [])
+        else:
+            self.camera_vector.set_data([], [])
+            self.camera_dart.set_data([], [])
+            
+        # Update LIDAR1 visualization
+        if lidar1_most_significant is not None:
+            lidar1_x, lidar1_y = lidar1_most_significant[0], lidar1_most_significant[1]
+            
+            # Draw vector from LIDAR1 position to detected point
+            dx = lidar1_x - self.lidar1_pos[0]
+            dy = lidar1_y - self.lidar1_pos[1]
+            length = np.sqrt(dx**2 + dy**2)
+            
+            if length > 0:
+                # Create 600mm vector
+                unit_x = dx / length
+                unit_y = dy / length
+                vector_end_x = self.lidar1_pos[0] + 600 * unit_x
+                vector_end_y = self.lidar1_pos[1] + 600 * unit_y
+                
+                # Draw LIDAR1 vector
+                self.lidar1_vector.set_data(
+                    [self.lidar1_pos[0], vector_end_x],
+                    [self.lidar1_pos[1], vector_end_y]
+                )
+                
+                # Draw projected point if available
+                if self.lidar1_projected_point is not None:
+                    self.lidar1_dart.set_data(
+                        [self.lidar1_projected_point[0]], 
+                        [self.lidar1_projected_point[1]]
+                    )
+                else:
+                    self.lidar1_dart.set_data([], [])
+            else:
+                self.lidar1_vector.set_data([], [])
+                self.lidar1_dart.set_data([], [])
+        else:
+            self.lidar1_vector.set_data([], [])
+            self.lidar1_dart.set_data([], [])
+            
+        # Update LIDAR2 visualization
+        if lidar2_most_significant is not None:
+            lidar2_x, lidar2_y = lidar2_most_significant[0], lidar2_most_significant[1]
+            
+            # Draw vector from LIDAR2 position to detected point
+            dx = lidar2_x - self.lidar2_pos[0]
+            dy = lidar2_y - self.lidar2_pos[1]
+            length = np.sqrt(dx**2 + dy**2)
+            
+            if length > 0:
+                # Create 600mm vector
+                unit_x = dx / length
+                unit_y = dy / length
+                vector_end_x = self.lidar2_pos[0] + 600 * unit_x
+                vector_end_y = self.lidar2_pos[1] + 600 * unit_y
+                
+                # Draw LIDAR2 vector
+                self.lidar2_vector.set_data(
+                    [self.lidar2_pos[0], vector_end_x],
+                    [self.lidar2_pos[1], vector_end_y]
+                )
+                
+                # Draw projected point if available
+                if self.lidar2_projected_point is not None:
+                    self.lidar2_dart.set_data(
+                        [self.lidar2_projected_point[0]], 
+                        [self.lidar2_projected_point[1]]
+                    )
+                else:
+                    self.lidar2_dart.set_data([], [])
+            else:
+                self.lidar2_vector.set_data([], [])
+                self.lidar2_dart.set_data([], [])
+        else:
+            self.lidar2_vector.set_data([], [])
+            self.lidar2_dart.set_data([], [])
+
+        # Update LIDAR scatter plots
+        self.scatter1.set_data(x1, y1)
+        self.scatter2.set_data(x2, y2)
+        
+        return (self.scatter1, self.scatter2, self.camera_vector, self.detected_dart,
+                self.lidar1_vector, self.lidar2_vector, self.camera_dart, 
+                self.lidar1_dart, self.lidar2_dart)
+                
+    def run(self, lidar1_script, lidar2_script):
+        """Start all components."""
+        lidar1_thread = threading.Thread(target=self.start_lidar, args=(lidar1_script, self.lidar1_queue, 1))
+        lidar2_thread = threading.Thread(target=self.start_lidar, args=(lidar2_script, self.lidar2_queue, 2))
+        camera_thread = threading.Thread(target=self.camera_detection)
+
+        lidar1_thread.start()
+        time.sleep(1)
+        lidar2_thread.start()
+        time.sleep(1)
+        camera_thread.start()
+
+        anim = FuncAnimation(self.fig, self.update_plot, interval=50, blit=False, cache_frame_data=False)
+        plt.show()
+
+        self.running = False
+        lidar1_thread.join()
+        lidar2_thread.join()
+        camera_thread.join()
+
+    def calibration_mode(self):
+        """Interactive calibration for LIDAR rotation and coefficient scaling."""
+        print("Calibration Mode")
+        print("1. LIDAR Rotation Calibration")
+        print("2. Coefficient Scaling Calibration")
+        print("q. Quit")
+        
+        option = input("Select option: ")
+        
+        if option == "1":
+            self._calibrate_lidar_rotation()
+        elif option == "2":
+            self._calibrate_coefficient_scaling()
+        else:
+            print("Exiting calibration mode.")
+    
+    def _calibrate_lidar_rotation(self):
+        """Interactive calibration for LIDAR rotation."""
+        print("LIDAR Rotation Calibration Mode")
+        print(f"Current LIDAR1 rotation: {self.lidar1_rotation}°")
+        print(f"Current LIDAR2 rotation: {self.lidar2_rotation}°")
+        
+        while True:
+            cmd = input("Enter L1+/L1-/L2+/L2- followed by degrees (e.g., L1+0.5) or 'q' to quit: ")
+            if cmd.lower() == 'q':
+                break
+                
+            try:
+                if cmd.startswith("L1+"):
+                    self.lidar1_rotation += float(cmd[3:])
+                elif cmd.startswith("L1-"):
+                    self.lidar1_rotation -= float(cmd[3:])
+                elif cmd.startswith("L2+"):
+                    self.lidar2_rotation += float(cmd[3:])
+                elif cmd.startswith("L2-"):
+                    self.lidar2_rotation -= float(cmd[3:])
+                    
+                print(f"Updated LIDAR1 rotation: {self.lidar1_rotation}°")
+                print(f"Updated LIDAR2 rotation: {self.lidar2_rotation}°")
+            except:
+                print("Invalid command format")
+    
+    def _calibrate_coefficient_scaling(self):
+        """Interactive calibration for coefficient scaling factors."""
+        print("Coefficient Scaling Calibration Mode")
+        print("Adjust scaling factors for specific segments and ring types.")
+        print("Format: [segment]:[ring_type]:[scale]")
+        print("  - segment: 1-20 or 'all'")
+        print("  - ring_type: 'doubles', 'trebles', 'small', 'large', or 'all'")
+        print("  - scale: scaling factor (e.g. 0.5, 1.0, 1.5)")
         print("Example: 20:doubles:1.5 - Sets double ring scaling for segment 20 to 1.5")
         print("Example: all:trebles:0.8 - Sets treble ring scaling for all segments to 0.8")
         
@@ -1457,3 +2027,58 @@ class LidarCameraVisualizer:
                     
             except ValueError:
                 print("Scale must be a numeric value")
+    
+    def save_coefficient_scaling(self, filename="coefficient_scaling.json"):
+        """Save the current coefficient scaling configuration to a JSON file."""
+        try:
+            with open(filename, 'w') as f:
+                json.dump(self.coefficient_scaling, f, indent=2)
+            print(f"Coefficient scaling saved to {filename}")
+            return True
+        except Exception as e:
+            print(f"Error saving coefficient scaling: {e}")
+            return False
+
+if __name__ == "__main__":
+    lidar1_script = "./tri_test_lidar1"
+    lidar2_script = "./tri_test_lidar2"
+    visualizer = LidarCameraVisualizer()
+    
+    # Try to load coefficient scaling from file
+    visualizer.load_coefficient_scaling()
+    
+    # Parse command line arguments
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--calibrate":
+            visualizer.calibration_mode()
+            # After calibration, ask to save settings
+            save = input("Save coefficient scaling settings? (y/n): ")
+            if save.lower() == 'y':
+                visualizer.save_coefficient_scaling()
+        elif sys.argv[1] == "--help":
+            print("Usage:")
+            print("  python script.py                  - Run the program normally")
+            print("  python script.py --calibrate      - Enter calibration mode")
+            print("  python script.py --help           - Show this help message")
+            print("\nNote: This version has been modified for a camera on the left side")
+            print("      of the board instead of at the top.")
+    else:
+        visualizer.run(lidar1_script, lidar2_script)
+    
+    def load_coefficient_scaling(self, filename="coefficient_scaling.json"):
+        """Load coefficient scaling configuration from a JSON file."""
+        try:
+            if os.path.exists(filename):
+                with open(filename, 'r') as f:
+                    loaded_scaling = json.load(f)
+                    
+                # Convert string keys back to integers
+                self.coefficient_scaling = {int(k): v for k, v in loaded_scaling.items()}
+                print(f"Coefficient scaling loaded from {filename}")
+                return True
+            else:
+                print(f"Scaling file {filename} not found, using defaults")
+                return False
+        except Exception as e:
+            print(f"Error loading coefficient scaling: {e}")
+            return False
