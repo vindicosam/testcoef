@@ -90,6 +90,9 @@ class LidarCameraVisualizer:
         # CSV logging initialization
         self.initialize_csv_logging()
 
+        # Dartboard scoring configuration (for display purposes)
+        self.score_text = None  # Will hold a text element to display the score
+
         # Dartboard scaling
         self.board_scale_factor = 2.75
         self.dartboard_image = mpimg.imread("winmau-blade-6-triple-core-carbon-professional-bristle-dartboard.jpg")
@@ -390,6 +393,63 @@ class LidarCameraVisualizer:
         # Signal handling
         signal.signal(signal.SIGINT, self.signal_handler)
 
+    def xy_to_dartboard_score(self, x, y):
+        """
+        Convert x,y coordinates to dartboard score.
+        
+        Args:
+            x (float): X coordinate in mm, with 0 at the center of the dartboard
+            y (float): Y coordinate in mm, with 0 at the center of the dartboard
+            
+        Returns:
+            str: Dartboard score notation (e.g. "T20", "D16", "S7", "B", "OB", "Outside")
+        """
+        # Dartboard scores configuration (clockwise from right of 20)
+        scores = [13, 4, 18, 1, 20, 5, 12, 9, 14, 11, 8, 16, 7, 19, 3, 17, 2, 15, 10, 6]
+        
+        # Calculate distance from center and angle
+        distance = np.sqrt(x * x + y * y)
+        angle = np.degrees(np.arctan2(y, x))
+        
+        # Adjust angle to match dartboard orientation (20 at top)
+        angle = (angle - 9 + 360) % 360
+        
+        # Determine score based on angle
+        segment_idx = int(angle / 18)
+        if segment_idx >= len(scores):  # Safety check
+            return "Outside"
+            
+        base_score = scores[segment_idx]
+        
+        # Determine multiplier and code based on distance
+        if distance <= self.radii['bullseye']:
+            return "B"  # Bullseye (50)
+        elif distance <= self.radii['outer_bull']:
+            return "OB"  # Outer bull (25)
+        elif self.radii['inner_treble'] < distance <= self.radii['outer_treble']:
+            return f"T{base_score}"  # Triple
+        elif self.radii['inner_double'] < distance <= self.radii['outer_double']:
+            return f"D{base_score}"  # Double
+        elif distance <= self.radii['outer_double']:
+            return f"S{base_score}"  # Single
+        else:
+            return "Outside"
+
+    def get_score_description(self, score):
+        """Return a human-readable description of the score."""
+        if score == "B":
+            return "Bullseye! Worth 50 points."
+        elif score == "OB":
+            return "Outer Bull. Worth 25 points."
+        elif score.startswith("T"):
+            return f"Triple {score[1:]}. Worth {int(score[1:]) * 3} points."
+        elif score.startswith("D"):
+            return f"Double {score[1:]}. Worth {int(score[1:]) * 2} points."
+        elif score.startswith("S"):
+            return f"Single {score[1:]}. Worth {int(score[1:])} points."
+        else:
+            return "Outside the board. Worth 0 points."
+
     def initialize_csv_logging(self):
         """Initialize CSV file for logging dart data."""
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -400,7 +460,8 @@ class LidarCameraVisualizer:
             csv_writer = csv.writer(csvfile)
             csv_writer.writerow(['Timestamp', 'Dart_X_mm', 'Dart_Y_mm', 
                                 'Tip_Pixel_X', 'Tip_Pixel_Y', 
-                                'Side_Lean_Angle', 'Up_Down_Lean_Angle'])
+                                'Side_Lean_Angle', 'Up_Down_Lean_Angle',
+                                'Score'])
         
         print(f"CSV logging initialized: {self.csv_filename}")
 
@@ -411,6 +472,11 @@ class LidarCameraVisualizer:
             
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         
+        # Calculate score if we have a valid position
+        score = "None"
+        if final_tip_position:
+            score = self.xy_to_dartboard_score(final_tip_position[0], final_tip_position[1])
+        
         with open(self.csv_filename, 'a', newline='') as csvfile:
             csv_writer = csv.writer(csvfile)
             csv_writer.writerow([
@@ -420,7 +486,8 @@ class LidarCameraVisualizer:
                 f"{tip_pixel[0]}" if tip_pixel else "None",
                 f"{tip_pixel[1]}" if tip_pixel else "None",
                 f"{side_lean_angle:.2f}" if side_lean_angle is not None else "None",
-                f"{up_down_lean_angle:.2f}" if up_down_lean_angle is not None else "None"
+                f"{up_down_lean_angle:.2f}" if up_down_lean_angle is not None else "None",
+                score
             ])
 
     def add_calibration_point(self, pixel_x, mm_y):
@@ -1394,6 +1461,23 @@ class LidarCameraVisualizer:
         if final_tip_position is not None:
             final_tip_position = self.apply_segment_coefficients(*final_tip_position)
 
+            # Calculate dartboard score for the detected position
+            score = self.xy_to_dartboard_score(final_tip_position[0], final_tip_position[1])
+            score_description = self.get_score_description(score)
+            
+            # Update score text on visualization
+            if hasattr(self, 'score_text') and self.score_text is not None:
+                self.score_text.remove()
+            self.score_text = self.ax.text(
+                -380, 350, f"Score: {score}\n{score_description}", 
+                color='red', fontsize=10, fontweight='bold',
+                ha='left', va='bottom'
+            )
+            
+            # Print detailed information including score
+            print(f"Dart detected - X: {final_tip_position[0]:.1f}, Y: {final_tip_position[1]:.1f}, "
+                  f"Score: {score} - {score_description}")
+
         # Update scatter plots with LIDAR data
         self.scatter1.set_data(x1, y1)
         self.scatter2.set_data(x2, y2)
@@ -1444,37 +1528,39 @@ class LidarCameraVisualizer:
                self.camera_dart, self.lidar1_dart, self.lidar2_dart, self.detected_dart
 
     def run(self, lidar1_script, lidar2_script):
-    """Start all components with the specified LIDAR scripts."""
-    # Start background threads
-    lidar1_thread = threading.Thread(
-        target=self.start_lidar, 
-        args=(lidar1_script, self.lidar1_queue, 1),
-        daemon=True
-    )
-    lidar2_thread = threading.Thread(
-        target=self.start_lidar, 
-        args=(lidar2_script, self.lidar2_queue, 2),
-        daemon=True
-    )
-    camera_thread = threading.Thread(target=self.camera_detection, daemon=True)
-    
-    # Start with delays between components - these are crucial!
-    lidar1_thread.start()
-    time.sleep(1)  # Give LIDAR 1 time to initialize
-    
-    lidar2_thread.start()
-    time.sleep(1)  # Give LIDAR 2 time to initialize
-    
-    camera_thread.start()
-    
-    # Start animation
-    self.ani = FuncAnimation(
-        self.fig, self.update_plot, 
-        blit=True, interval=100, 
-        cache_frame_data=False
-    )
-    
-    plt.show()
+        """Start all components with the specified LIDAR scripts."""
+        # Start background threads
+        lidar1_thread = threading.Thread(
+            target=self.start_lidar, 
+            args=(lidar1_script, self.lidar1_queue, 1),
+            daemon=True
+        )
+        lidar2_thread = threading.Thread(
+            target=self.start_lidar, 
+            args=(lidar2_script, self.lidar2_queue, 2),
+            daemon=True
+        )
+        camera_thread = threading.Thread(target=self.camera_detection, daemon=True)
+        
+        # Start with delays between components - these are crucial!
+        lidar1_thread.start()
+        time.sleep(1)  # Give LIDAR 1 time to initialize
+        
+        lidar2_thread.start()
+        time.sleep(1)  # Give LIDAR 2 time to initialize
+        
+        camera_thread.start()
+        
+        # Start animation
+        self.ani = FuncAnimation(
+            self.fig, self.update_plot, 
+            blit=True, interval=100, 
+            cache_frame_data=False
+        )
+        
+        plt.show()
+
+
 
 if __name__ == "__main__":
     # Use same LIDAR script paths as in your original code
