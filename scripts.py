@@ -1,3 +1,52 @@
+
+def __init__(self):
+    # ... (earlier code remains the same)
+    
+    # Camera configuration - MODIFIED FOR LEFT POSITION
+    self.camera_position = (-350, 0)     # Camera is to the left of the board
+    self.camera_vector_length = 1600     # Vector length in mm
+    self.camera_data = {"dart_mm_y": None, "dart_angle": None}  # Now tracking Y position
+
+    # ROI Settings for side camera
+    self.camera_board_plane_y = 247  # The y-coordinate where the board surface is
+    self.camera_roi_range = 30       # How much above and below to include
+    self.camera_roi_top = self.camera_board_plane_y - self.camera_roi_range
+    self.camera_roi_bottom = self.camera_board_plane_y + self.camera_roi_range
+    
+    # Add calibration point system
+    self.camera_calibration_points = []  # List of (pixel_x, mm_y) tuples for calibration
+    # Default linear calibration as fallback
+    self.pixel_to_mm_factor = -0.628  # Slope in mm/pixel 
+    self.pixel_offset = 192.8        # Board y when pixel_x = 0
+
+    # Detection persistence to maintain visibility
+    self.last_valid_detection = {"dart_mm_y": None, "dart_angle": None}
+    self.detection_persistence_counter = 0
+    self.detection_persistence_frames = 30
+
+    # Camera background subtractor with sensitive parameters
+    self.camera_bg_subtractor = cv2.createBackgroundSubtractorMOG2(
+        history=30, varThreshold=25, detectShadows=False
+    )
+
+    # LIDAR queues
+    self.lidar1_queue = Queue()
+    self.lidar2_queue = Queue()
+    
+    # ... (rest of initialization continues)
+def add_calibration_point(self, pixel_x, mm_y):
+    """Add a calibration point mapping pixel x-coordinate to mm y-coordinate."""
+    # ... method body ...
+
+def pixel_to_mm(self, pixel_x):
+    """Convert pixel x-coordinate to mm y-coordinate using calibration points."""
+    # ... method body ...
+
+def clear_calibration_points(self):
+    """Clear all calibration points."""
+    # ... method body ...
+
+
 # Add these to the initialization method (__init__)
 self.camera_calibration_points = []  # List of (pixel_x, mm_y) tuples for calibration
 # Default linear calibration as fallback
