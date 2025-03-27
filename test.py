@@ -36,7 +36,7 @@ class LidarCameraVisualizer:
         # Camera configuration - MODIFIED FOR LEFT POSITION
         self.camera_position = (-350, 0)     # Camera is to the left of the board
         self.camera_vector_length = 1600     # Vector length in mm
-        self.camera_data = {"dart_mm_y": None, "dart_angle": None}  # Now tracking Y position
+        self.camera_data = {"dart_mm_y": None, "dart_angle": None, "tip_pixel": None}  # Now tracking Y position
 
         # ROI Settings for side camera (similar to camera2 in the dual setup)
         self.camera_board_plane_y = 250  # The y-coordinate where the board surface is
@@ -53,7 +53,7 @@ class LidarCameraVisualizer:
         self.pixel_offset = 192.8        # Board y when pixel_x = 0
 
         # Detection persistence to maintain visibility
-        self.last_valid_detection = {"dart_mm_y": None, "dart_angle": None}
+        self.last_valid_detection = {"dart_mm_y": None, "dart_angle": None, "tip_pixel": None}
         self.detection_persistence_counter = 0
         self.detection_persistence_frames = 30
 
@@ -87,6 +87,9 @@ class LidarCameraVisualizer:
         # Intersection point of camera vector with board plane
         self.camera_board_intersection = None
 
+        # CSV logging
+        self.initialize_csv_logging()
+
         # Dartboard scaling
         self.board_scale_factor = 2.75
         self.dartboard_image = mpimg.imread("winmau-blade-6-triple-core-carbon-professional-bristle-dartboard.jpg")
@@ -107,10 +110,231 @@ class LidarCameraVisualizer:
         self.large_segment_coeff = {
             "14_5": {"x_correction": -1.888, "y_correction": 12.790},
             "11_4": {"x_correction": -6.709, "y_correction": 14.045},
-            # ... [rest of the coefficients remain unchanged]
+            "11_0": {"x_correction": -6.605, "y_correction": 13.916},
+            "11_5": {"x_correction": -5.090, "y_correction": 11.821},
+            "11_1": {"x_correction": -4.847, "y_correction": 11.024},
+            "8_0": {"x_correction": -6.395, "y_correction": 13.293},
+            "7_0": {"x_correction": -9.691, "y_correction": 12.377},
+            "7_1": {"x_correction": -9.591, "y_correction": 11.792},
+            "8_1": {"x_correction": -6.213, "y_correction": 11.840},
+            "16_1": {"x_correction": -10.269, "y_correction": 11.723},
+            "2_1": {"x_correction": -4.985, "y_correction": 10.641},
+            "8_4": {"x_correction": -8.981, "y_correction": 11.649},
+            "14_1": {"x_correction": -1.723, "y_correction": 10.927},
+            "8_5": {"x_correction": -4.535, "y_correction": 11.181},
+            "3_1": {"x_correction": -8.918, "y_correction": 10.807},
+            "9_0": {"x_correction": -3.342, "y_correction": 7.611},
+            "16_5": {"x_correction": -10.830, "y_correction": 10.470},
+            "17_0": {"x_correction": -8.497, "y_correction": 8.977},
+            "16_0": {"x_correction": -8.224, "y_correction": 8.937},
+            "19_1": {"x_correction": -10.042, "y_correction": 8.801},
+            "4_5": {"x_correction": -4.686, "y_correction": 8.744},
+            "19_5": {"x_correction": -10.075, "y_correction": 8.604},
+            "12_4": {"x_correction": -0.499, "y_correction": 8.492},
+            "19_4": {"x_correction": -13.455, "y_correction": 8.033},
+            "14_4": {"x_correction": -1.960, "y_correction": 7.888},
+            "3_5": {"x_correction": -10.917, "y_correction": 7.779},
+            "17_5": {"x_correction": -9.926, "y_correction": 5.224},
+            "6_1": {"x_correction": -5.905, "y_correction": 7.375},
+            "14_0": {"x_correction": -0.637, "y_correction": 7.264},
+            "15_1": {"x_correction": -7.194, "y_correction": 6.566},
+            "5_5": {"x_correction": -2.309, "y_correction": 5.927},
+            "6_0": {"x_correction": -7.530, "y_correction": 5.270},
+            "10_1": {"x_correction": -9.194, "y_correction": 6.558},
+            "12_1": {"x_correction": -1.734, "y_correction": 4.059},
+            "12_0": {"x_correction": -3.338, "y_correction": 6.216},
+            "19_0": {"x_correction": -9.766, "y_correction": 6.125},
+            "9_4": {"x_correction": -1.636, "y_correction": 4.641},
+            "5_4": {"x_correction": -8.349, "y_correction": 5.671},
+            "9_1": {"x_correction": -1.606, "y_correction": 5.520},
+            "2_5": {"x_correction": -7.027, "y_correction": 4.896},
+            "18_1": {"x_correction": -3.413, "y_correction": 4.881},
+            "13_1": {"x_correction": -5.517, "y_correction": 3.166},
+            "1_0": {"x_correction": -0.407, "y_correction": 4.015},
+            "10_0": {"x_correction": -7.208, "y_correction": 3.562},
+            "17_4": {"x_correction": -8.488, "y_correction": 4.264},
+            "15_0": {"x_correction": -7.664, "y_correction": 3.148},
+            "1_5": {"x_correction": -0.208, "y_correction": 3.515},
+            "9_5": {"x_correction": -1.443, "y_correction": 4.024},
+            "4_4": {"x_correction": 3.680, "y_correction": 3.977},
+            "13_0": {"x_correction": -7.877, "y_correction": 3.825},
+            "18_5": {"x_correction": -1.150, "y_correction": 2.951},
+            "20_0": {"x_correction": -0.209, "y_correction": 3.703},
+            "20_4": {"x_correction": 0.030, "y_correction": 3.679},
+            "1_1": {"x_correction": 0.153, "y_correction": 3.588},
+            "13_4": {"x_correction": -1.385, "y_correction": 3.558},
+            "6_4": {"x_correction": -4.651, "y_correction": 3.224},
+            "18_0": {"x_correction": 0.445, "y_correction": 3.093},
+            "20_5": {"x_correction": 3.307, "y_correction": 1.799},
+            "20_1": {"x_correction": 1.100, "y_correction": 2.753},
+            "4_1": {"x_correction": -3.415, "y_correction": 3.065},
+            "6_5": {"x_correction": -5.995, "y_correction": 2.865},
+            "3_4": {"x_correction": -8.063, "y_correction": 2.598},
+            "5_1": {"x_correction": -1.836, "y_correction": 2.499},
+            "18_4": {"x_correction": -0.437, "y_correction": 2.494},
+            "12_5": {"x_correction": -2.815, "y_correction": 1.152},
+            "4_0": {"x_correction": -2.765, "y_correction": 1.995},
+            "15_5": {"x_correction": -2.276, "y_correction": 1.083},
+            "1_4": {"x_correction": -3.322, "y_correction": 1.726},
+            "13_5": {"x_correction": -2.024, "y_correction": 0.790},
+            "10_4": {"x_correction": -4.923, "y_correction": 0.783},
+            "5_0": {"x_correction": -2.016, "y_correction": 0.725},
+            "2_4": {"x_correction": -0.837, "y_correction": 0.118},
+            "10_5": {"x_correction": -3.798, "y_correction": -0.596}
         }
         
-        # [Other coefficient dictionaries remain unchanged]
+        # Coefficients for the double ring area
+        self.doubles_coeff = {
+            "1_1": {"x_correction": 3.171, "y_correction": 0.025},
+            "14_5": {"x_correction": 1.920, "y_correction": 6.191},
+            "20_1": {"x_correction": 1.812, "y_correction": 1.691},
+            "20_5": {"x_correction": 0.901, "y_correction": -0.772},
+            "5_1": {"x_correction": 1.289, "y_correction": 2.309},
+            "12_1": {"x_correction": -0.341, "y_correction": 2.428},
+            "13_1": {"x_correction": -0.154, "y_correction": -2.869},
+            "12_3": {"x_correction": 0.892, "y_correction": 1.668},
+            "1_5": {"x_correction": 0.508, "y_correction": -2.633},
+            "12_5": {"x_correction": 0.714, "y_correction": 0.641},
+            "18_1": {"x_correction": 0.398, "y_correction": 0.107},
+            "5_5": {"x_correction": 0.447, "y_correction": -0.214},
+            "11_5": {"x_correction": 0.024, "y_correction": 10.893},
+            "9_1": {"x_correction": -3.442, "y_correction": 4.916},
+            "14_1": {"x_correction": -0.489, "y_correction": 11.128},
+            "18_5": {"x_correction": -2.239, "y_correction": -0.348},
+            "11_1": {"x_correction": -2.255, "y_correction": 11.938},
+            "15_1": {"x_correction": -2.844, "y_correction": 5.225},
+            "1_0": {"x_correction": -1.988, "y_correction": 0.472},
+            "9_5": {"x_correction": -3.420, "y_correction": 3.773},
+            "4_0": {"x_correction": -2.919, "y_correction": 9.090},
+            "8_5": {"x_correction": -3.642, "y_correction": 14.419},
+            "6_1": {"x_correction": -3.798, "y_correction": -2.819},
+            "6_0": {"x_correction": -3.986, "y_correction": 0.326},
+            "4_1": {"x_correction": -4.062, "y_correction": -0.001},
+            "4_5": {"x_correction": -4.586, "y_correction": 2.522},
+            "10_1": {"x_correction": -5.709, "y_correction": 0.317},
+            "15_5": {"x_correction": -4.602, "y_correction": 6.307},
+            "13_3": {"x_correction": -5.236, "y_correction": -2.793},
+            "2_5": {"x_correction": -6.853, "y_correction": 4.826},
+            "13_5": {"x_correction": -6.011, "y_correction": -0.742},
+            "19_0": {"x_correction": -6.175, "y_correction": 7.132},
+            "8_1": {"x_correction": -6.521, "y_correction": 12.622},
+            "2_1": {"x_correction": -6.639, "y_correction": 4.853},
+            "16_4": {"x_correction": -6.744, "y_correction": 10.677},
+            "6_5": {"x_correction": -8.855, "y_correction": 1.088},
+            "8_3": {"x_correction": -7.429, "y_correction": 12.300},
+            "17_1": {"x_correction": -10.417, "y_correction": 2.648},
+            "17_5": {"x_correction": -9.882, "y_correction": 9.256},
+            "10_5": {"x_correction": -10.464, "y_correction": 2.446},
+            "3_1": {"x_correction": -12.581, "y_correction": 8.704}
+        }
+        
+        # Coefficients for the triple ring area (trebles)
+        self.trebles_coeff = {
+            "1_1": {"x_correction": 3.916, "y_correction": 7.238},
+            "1_5": {"x_correction": 2.392, "y_correction": 0.678},
+            "20_5": {"x_correction": 0.486, "y_correction": 4.293},
+            "12_5": {"x_correction": -3.547, "y_correction": 6.943},
+            "9_5": {"x_correction": -2.731, "y_correction": 6.631},
+            "5_3": {"x_correction": 0.329, "y_correction": 6.408},
+            "18_5": {"x_correction": -0.707, "y_correction": 0.318},
+            "6_5": {"x_correction": -3.776, "y_correction": 0.478},
+            "5_4": {"x_correction": -0.643, "y_correction": 5.413},
+            "20_4": {"x_correction": -1.589, "y_correction": 4.333},
+            "4_5": {"x_correction": -2.487, "y_correction": -0.736},
+            "1_4": {"x_correction": -2.523, "y_correction": 5.148},
+            "1_3": {"x_correction": -1.564, "y_correction": 4.005},
+            "11_4": {"x_correction": -1.692, "y_correction": 12.002},
+            "4_4": {"x_correction": -2.392, "y_correction": 5.377},
+            "18_2": {"x_correction": -2.261, "y_correction": 2.238},
+            "15_4": {"x_correction": -4.329, "y_correction": 6.308},
+            "14_5": {"x_correction": -4.835, "y_correction": 9.586},
+            "13_5": {"x_correction": -3.615, "y_correction": 2.233},
+            "15_3": {"x_correction": -2.650, "y_correction": -0.747},
+            "14_3": {"x_correction": -2.933, "y_correction": 10.375},
+            "5_5": {"x_correction": -3.065, "y_correction": 5.476},
+            "13_2": {"x_correction": -3.526, "y_correction": 5.453},
+            "2_4": {"x_correction": -3.536, "y_correction": 2.872},
+            "18_4": {"x_correction": -3.965, "y_correction": 2.129},
+            "10_2": {"x_correction": -4.432, "y_correction": -3.304},
+            "11_5": {"x_correction": -7.210, "y_correction": 9.992},
+            "16_4": {"x_correction": -4.816, "y_correction": 6.071},
+            "10_4": {"x_correction": -6.640, "y_correction": 4.376},
+            "8_5": {"x_correction": -5.485, "y_correction": 11.023},
+            "6_2": {"x_correction": -5.893, "y_correction": 5.692},
+            "13_4": {"x_correction": -6.091, "y_correction": 5.513},
+            "6_4": {"x_correction": -6.493, "y_correction": 2.749},
+            "8_3": {"x_correction": -6.553, "y_correction": 10.721},
+            "15_5": {"x_correction": -7.578, "y_correction": 5.281},
+            "17_4": {"x_correction": -7.701, "y_correction": 4.141},
+            "9_4": {"x_correction": -7.743, "y_correction": 5.096},
+            "10_3": {"x_correction": -7.774, "y_correction": 0.795},
+            "2_5": {"x_correction": -9.829, "y_correction": 7.675},
+            "2_3": {"x_correction": -9.342, "y_correction": 4.183},
+            "17_3": {"x_correction": -9.878, "y_correction": 8.301},
+            "7_5": {"x_correction": -10.593, "y_correction": 11.340},
+            "3_2": {"x_correction": -10.107, "y_correction": 10.510},
+            "19_2": {"x_correction": -10.599, "y_correction": 5.780},
+            "10_5": {"x_correction": -10.654, "y_correction": 2.223},
+            "7_3": {"x_correction": -10.696, "y_correction": 11.291},
+            "16_3": {"x_correction": -11.650, "y_correction": 8.589},
+            "3_3": {"x_correction": -12.353, "y_correction": 8.187}
+        }
+        
+        # Coefficients for the inner single area (small segments)
+        self.small_segment_coeff = {
+            "8_5": {"x_correction": -7.021, "y_correction": 9.646},
+            "5_1": {"x_correction": -2.830, "y_correction": 9.521},
+            "11_5": {"x_correction": -6.008, "y_correction": 10.699},
+            "2_5": {"x_correction": -6.268, "y_correction": 7.615},
+            "20_1": {"x_correction": 0.963, "y_correction": 10.550},
+            "14_4": {"x_correction": -5.388, "y_correction": 8.898},
+            "9_4": {"x_correction": -5.635, "y_correction": 8.149},
+            "12_0": {"x_correction": -6.959, "y_correction": 10.260},
+            "16_5": {"x_correction": -11.642, "y_correction": 10.048},
+            "14_5": {"x_correction": -4.386, "y_correction": 10.033},
+            "3_4": {"x_correction": -7.878, "y_correction": 9.123},
+            "19_4": {"x_correction": -8.770, "y_correction": 9.305},
+            "17_5": {"x_correction": -8.988, "y_correction": 9.779},
+            "5_5": {"x_correction": 1.819, "y_correction": 9.487},
+            "9_0": {"x_correction": -4.911, "y_correction": 7.613},
+            "4_1": {"x_correction": -1.519, "y_correction": 8.133},
+            "7_4": {"x_correction": -11.424, "y_correction": 9.196},
+            "16_4": {"x_correction": -10.080, "y_correction": 8.196},
+            "12_5": {"x_correction": -1.101, "y_correction": 8.018},
+            "14_0": {"x_correction": -6.371, "y_correction": 8.618},
+            "20_4": {"x_correction": -2.488, "y_correction": 7.384},
+            "18_0": {"x_correction": 0.999, "y_correction": 7.666},
+            "12_1": {"x_correction": -2.311, "y_correction": 7.972},
+            "11_1": {"x_correction": -5.123, "y_correction": 8.361},
+            "7_5": {"x_correction": -10.936, "y_correction": 8.215},
+            "1_0": {"x_correction": -1.665, "y_correction": 8.301},
+            "1_1": {"x_correction": 1.706, "y_correction": 8.171},
+            "17_4": {"x_correction": -10.220, "y_correction": 7.089},
+            "19_5": {"x_correction": -9.638, "y_correction": 8.098},
+            "8_1": {"x_correction": -6.475, "y_correction": 7.005},
+            "18_5": {"x_correction": -1.040, "y_correction": 5.177},
+            "18_1": {"x_correction": -0.922, "y_correction": 6.026},
+            "6_4": {"x_correction": 0.032, "y_correction": 7.757},
+            "10_0": {"x_correction": -0.047, "y_correction": 4.356},
+            "1_5": {"x_correction": -1.026, "y_correction": 7.089},
+            "7_0": {"x_correction": -2.914, "y_correction": 6.025},
+            "19_0": {"x_correction": -4.016, "y_correction": 6.535},
+            "3_1": {"x_correction": -3.210, "y_correction": 7.153},
+            "11_4": {"x_correction": -5.380, "y_correction": 7.119},
+            "6_0": {"x_correction": -0.378, "y_correction": 4.360},
+            "15_1": {"x_correction": -2.137, "y_correction": 5.343},
+            "2_1": {"x_correction": -3.566, "y_correction": 6.891},
+            "13_5": {"x_correction": -1.611, "y_correction": 5.200},
+            "8_0": {"x_correction": -5.113, "y_correction": 6.868},
+            "10_4": {"x_correction": -5.279, "y_correction": 4.516},
+            "18_4": {"x_correction": -1.608, "y_correction": 6.575},
+            "16_0": {"x_correction": -2.293, "y_correction": 6.462},
+            "4_0": {"x_correction": -1.653, "y_correction": 6.338},
+            "5_4": {"x_correction": -2.519, "y_correction": 4.993},
+            "12_4": {"x_correction": -3.529, "y_correction": 6.306},
+            "13_4": {"x_correction": -2.516, "y_correction": 5.167},
+            "4_5": {"x_correction": -2.475, "y_correction": 6.135}
+        }
 
         # Calibration factors for lean correction
         self.side_lean_max_adjustment = 6.0  # mm, maximum adjustment for side lean
@@ -159,9 +383,6 @@ class LidarCameraVisualizer:
         
         # Maximum expected X-difference for maximum lean (calibration parameter)
         self.MAX_X_DIFF_FOR_MAX_LEAN = 4.0  # mm
-        
-        # CSV logging
-        self.initialize_csv_logging()
         
         # Setup visualization
         self.setup_plot()
@@ -294,10 +515,18 @@ class LidarCameraVisualizer:
     def start_lidar(self, script_path, queue_obj, lidar_id):
         """Start LIDAR subprocess and process data."""
         try:
-            process = subprocess.Popen([script_path], stdout=subprocess.PIPE, text=True)
+            # Split script_path into path and arguments
+            parts = script_path.split()
+            path = parts[0]
+            args = parts[1:] if len(parts) > 1 else []
+            
+            process = subprocess.Popen([path] + args, stdout=subprocess.PIPE, text=True)
             print(f"LIDAR {lidar_id} started successfully.")
             while self.running:
                 line = process.stdout.readline()
+                if not line:  # Process terminated
+                    print(f"LIDAR {lidar_id} process terminated.")
+                    break
                 if "a:" in line and "d:" in line:
                     try:
                         parts = line.strip().split()
@@ -319,7 +548,7 @@ class LidarCameraVisualizer:
             tip_point: Detected tip coordinates (x,y)
             
         Returns:
-            angle: Angle in degrees (90Â° = vertical) or None if angle couldn't be calculated
+            angle: Angle in degrees (90° = vertical) or None if angle couldn't be calculated
         """
         if tip_point is None:
             return None
@@ -481,6 +710,7 @@ class LidarCameraVisualizer:
             # Reset current detection
             self.camera_data["dart_mm_y"] = None
             self.camera_data["dart_angle"] = None
+            self.camera_data["tip_pixel"] = None
 
             # Detect contours
             contours, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -1228,12 +1458,12 @@ class LidarCameraVisualizer:
         # Start background threads
         lidar1_thread = threading.Thread(
             target=self.start_lidar, 
-            args=("./lidar_reader.py --port /dev/ttyUSB0", self.lidar1_queue, 1),
+            args=("/home/sam/YDLidar-SDK/lidar_scripts/lidar_reader.py --port /dev/ttyUSB0", self.lidar1_queue, 1),
             daemon=True
         )
         lidar2_thread = threading.Thread(
             target=self.start_lidar, 
-            args=("./lidar_reader.py --port /dev/ttyUSB1", self.lidar2_queue, 2),
+            args=("/home/sam/YDLidar-SDK/lidar_scripts/lidar_reader.py --port /dev/ttyUSB1", self.lidar2_queue, 2),
             daemon=True
         )
         camera_thread = threading.Thread(target=self.camera_detection, daemon=True)
