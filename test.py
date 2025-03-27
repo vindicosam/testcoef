@@ -1444,32 +1444,37 @@ class LidarCameraVisualizer:
                self.camera_dart, self.lidar1_dart, self.lidar2_dart, self.detected_dart
 
     def run(self, lidar1_script, lidar2_script):
-        """Start all components with the specified LIDAR scripts."""
-        # Start background threads
-        lidar1_thread = threading.Thread(
-            target=self.start_lidar, 
-            args=(lidar1_script, self.lidar1_queue, 1),
-            daemon=True
-        )
-        lidar2_thread = threading.Thread(
-            target=self.start_lidar, 
-            args=(lidar2_script, self.lidar2_queue, 2),
-            daemon=True
-        )
-        camera_thread = threading.Thread(target=self.camera_detection, daemon=True)
-        
-        lidar1_thread.start()
-        lidar2_thread.start()
-        camera_thread.start()
-        
-        # Start animation
-        self.ani = FuncAnimation(
-            self.fig, self.update_plot, 
-            blit=True, interval=100, 
-            cache_frame_data=False
-        )
-        
-        plt.show()
+    """Start all components with the specified LIDAR scripts."""
+    # Start background threads
+    lidar1_thread = threading.Thread(
+        target=self.start_lidar, 
+        args=(lidar1_script, self.lidar1_queue, 1),
+        daemon=True
+    )
+    lidar2_thread = threading.Thread(
+        target=self.start_lidar, 
+        args=(lidar2_script, self.lidar2_queue, 2),
+        daemon=True
+    )
+    camera_thread = threading.Thread(target=self.camera_detection, daemon=True)
+    
+    # Start with delays between components - these are crucial!
+    lidar1_thread.start()
+    time.sleep(1)  # Give LIDAR 1 time to initialize
+    
+    lidar2_thread.start()
+    time.sleep(1)  # Give LIDAR 2 time to initialize
+    
+    camera_thread.start()
+    
+    # Start animation
+    self.ani = FuncAnimation(
+        self.fig, self.update_plot, 
+        blit=True, interval=100, 
+        cache_frame_data=False
+    )
+    
+    plt.show()
 
 if __name__ == "__main__":
     # Use same LIDAR script paths as in your original code
