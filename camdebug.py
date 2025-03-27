@@ -10,8 +10,8 @@ class CameraDebugger:
         self.camera_roi_range = 30       # How much above and below to include
         self.camera_roi_top = self.camera_board_plane_y - self.camera_roi_range
         self.camera_roi_bottom = self.camera_board_plane_y + self.camera_roi_range
-        self.camera_roi_left = 121       # Left boundary
-        self.camera_roi_right = 590      # Right boundary
+        self.camera_roi_left = 119       # Left boundary
+        self.camera_roi_right = 604      # Right boundary
         
         # Default linear calibration for pixel-to-mm conversion
         self.pixel_to_mm_factor = -0.628  # Slope in mm/pixel 
@@ -22,10 +22,15 @@ class CameraDebugger:
         self.detection_persistence_counter = 0
         self.detection_persistence_frames = 30
         
-        # Background subtractor with adjustable parameters
+        # Background subtractor with improved parameters for fast movement
         self.camera_bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history=75, varThreshold=50, detectShadows=False
+            history=30,  # Reduced from 75 to adapt faster
+            varThreshold=35,  # More sensitive than 50
+            detectShadows=False
         )
+        
+        # Previous frame storage for frame differencing
+        self.prev_gray = None
         
         # Flags and storage
         self.running = True
@@ -37,20 +42,27 @@ class CameraDebugger:
         self.show_background = True
         self.show_angle = True
         self.show_epipolar = True
+        self.show_diff = True  # Show frame differencing result
         
         # Create windows
         cv2.namedWindow("Camera Feed", cv2.WINDOW_NORMAL)
         cv2.namedWindow("ROI", cv2.WINDOW_NORMAL)
         cv2.namedWindow("Background Mask", cv2.WINDOW_NORMAL)
         cv2.namedWindow("Board Visualization", cv2.WINDOW_NORMAL)
+        cv2.namedWindow("Frame Difference", cv2.WINDOW_NORMAL)  # New window for frame differencing
         
         # Trackbars for parameter tuning
         cv2.createTrackbar("ROI Top", "ROI", self.camera_roi_top, 480, self.update_roi_top)
         cv2.createTrackbar("ROI Bottom", "ROI", self.camera_roi_bottom, 480, self.update_roi_bottom)
         cv2.createTrackbar("ROI Left", "ROI", self.camera_roi_left, 640, self.update_roi_left)
         cv2.createTrackbar("ROI Right", "ROI", self.camera_roi_right, 640, self.update_roi_right)
-        cv2.createTrackbar("BG History", "Background Mask", 75, 200, self.update_bg_history)
-        cv2.createTrackbar("BG Threshold", "Background Mask", 50, 100, self.update_bg_threshold)
+        cv2.createTrackbar("BG History", "Background Mask", 30, 200, self.update_bg_history)
+        cv2.createTrackbar("BG Threshold", "Background Mask", 35, 100, self.update_bg_threshold)
+        cv2.createTrackbar("Diff Threshold", "Frame Difference", 25, 100, self.update_diff_threshold)
+        
+        # Thresholds for frame differencing and contour detection
+        self.diff_threshold = 25
+        self.min_contour_area = 30  # Reduced from 50
         
     def update_roi_top(self, value):
         self.camera_roi_top = value
@@ -79,6 +91,9 @@ class CameraDebugger:
             varThreshold=value,
             detectShadows=False
         )
+        
+    def update_diff_threshold(self, value):
+        self.diff_threshold = value
     
     def pixel_to_mm(self, pixel_x):
         """
@@ -105,7 +120,7 @@ class CameraDebugger:
         # Define search parameters
         search_depth = 25  # How far to search from the tip
         search_width = 40  # Width of search area
-        min_points = 8     # Minimum points needed for reliable angle
+        min_points = 6     # Reduced from 8 to be more tolerant with fast movement
         
         # Define region to search for the dart shaft
         # For a left camera, search to the right of the tip point
@@ -283,8 +298,8 @@ class CameraDebugger:
                 print("Failed to get frame from camera.")
                 break
             
-            # Rotate frame 90 degrees - adjust as needed for your camera orientation
-            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+            # Rotate frame 180 degrees
+            frame = cv2.rotate(frame, cv2.ROTATE_180)
             
             # Show original frame with ROI rectangle marked
             if self.show_original:
@@ -299,16 +314,37 @@ class CameraDebugger:
             roi = frame[self.camera_roi_top:self.camera_roi_bottom, 
                         self.camera_roi_left:self.camera_roi_right]
             
-            # Background subtraction
+            # Convert to grayscale
             gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            
+            # ---- Enhanced motion detection using frame differencing ----
+            if self.prev_gray is None:
+                self.prev_gray = gray.copy()
+            
+            # Calculate absolute difference between current and previous frame
+            frame_diff = cv2.absdiff(gray, self.prev_gray)
+            _, diff_thresh = cv2.threshold(frame_diff, self.diff_threshold, 255, cv2.THRESH_BINARY)
+            
+            # Show frame difference result
+            if self.show_diff:
+                diff_vis = cv2.cvtColor(diff_thresh, cv2.COLOR_GRAY2BGR)
+                cv2.imshow("Frame Difference", diff_vis)
+            
+            # Update previous frame for next iteration
+            self.prev_gray = gray.copy()
+            
+            # Background subtraction
             fg_mask = self.camera_bg_subtractor.apply(gray)
             
-            # Thresholding
-            fg_mask = cv2.threshold(fg_mask, 180, 255, cv2.THRESH_BINARY)[1]
+            # Lower threshold for foreground detection
+            fg_mask = cv2.threshold(fg_mask, 130, 255, cv2.THRESH_BINARY)[1]  # Reduced from 180
             
-            # Morphological operations to enhance the dart
+            # Combine background subtraction with frame differencing to catch fast movement
+            combined_mask = cv2.bitwise_or(fg_mask, diff_thresh)
+            
+            # Morphological operations to enhance the dart with increased dilation
             kernel = np.ones((3,3), np.uint8)
-            fg_mask = cv2.dilate(fg_mask, kernel, iterations=1)
+            combined_mask = cv2.dilate(combined_mask, kernel, iterations=2)  # Increased from 1
             
             # Reset current detection
             self.camera_data["dart_pixel_x"] = None
@@ -319,7 +355,7 @@ class CameraDebugger:
             roi_vis = roi.copy()
             
             # Detect contours
-            contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            contours, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
             if contours:
                 # Find contour with suitable size
@@ -328,7 +364,7 @@ class CameraDebugger:
                 
                 for contour in contours:
                     area = cv2.contourArea(contour)
-                    if area > 50:  # Threshold for contour size
+                    if area > self.min_contour_area:  # Reduced threshold from 50 to 30
                         x, y, w, h = cv2.boundingRect(contour)
                         
                         # Draw contour and bounding box
@@ -350,7 +386,7 @@ class CameraDebugger:
                     cv2.circle(roi_vis, tip_point, 4, (0, 0, 255), -1)
                     
                     # Calculate dart angle
-                    dart_angle = self.measure_tip_angle(fg_mask, tip_point)
+                    dart_angle = self.measure_tip_angle(combined_mask, tip_point)
                     
                     # Draw the angle line if angle was successfully calculated
                     if dart_angle is not None:
@@ -373,16 +409,17 @@ class CameraDebugger:
                     
                     # Print detection data
                     print(f"Frame {frame_count}: Detected dart - pixel_x: {global_pixel_x}, " + 
-                          f"angle: {dart_angle:.1f}°, mm_y: {dart_mm_y:.1f}mm")
+                          f"angle: {dart_angle:.1f if dart_angle else None}°, mm_y: {dart_mm_y:.1f}mm")
             
             # If no dart detected but we have a valid previous detection
             elif self.detection_persistence_counter > 0:
                 self.detection_persistence_counter -= 1
                 if self.detection_persistence_counter > 0:
                     self.camera_data = self.last_valid_detection.copy()
+                    angle_str = f"{self.camera_data['dart_angle']:.1f}°" if self.camera_data['dart_angle'] else "None"
                     print(f"Frame {frame_count}: Using persistence - " + 
                           f"pixel_x: {self.camera_data['dart_pixel_x']}, " +
-                          f"angle: {self.camera_data['dart_angle']:.1f}°, " +
+                          f"angle: {angle_str}, " +
                           f"mm_y: {self.camera_data['dart_mm_y']:.1f}mm")
             
             # Show ROI with detection visualization
@@ -392,8 +429,8 @@ class CameraDebugger:
             # Show background mask
             if self.show_background:
                 # Convert to color to make it more visible
-                fg_mask_vis = cv2.cvtColor(fg_mask, cv2.COLOR_GRAY2BGR)
-                cv2.imshow("Background Mask", fg_mask_vis)
+                mask_vis = cv2.cvtColor(combined_mask, cv2.COLOR_GRAY2BGR)
+                cv2.imshow("Background Mask", mask_vis)
             
             # Show epipolar line visualization 
             if self.show_epipolar:
@@ -410,15 +447,16 @@ class CameraDebugger:
                 timestamp = time.strftime("%Y%m%d-%H%M%S")
                 cv2.imwrite(f"camera_feed_{timestamp}.png", original_vis)
                 cv2.imwrite(f"roi_view_{timestamp}.png", roi_vis)
-                cv2.imwrite(f"bg_mask_{timestamp}.png", fg_mask)
+                cv2.imwrite(f"bg_mask_{timestamp}.png", combined_mask)
+                cv2.imwrite(f"diff_mask_{timestamp}.png", diff_thresh)
                 if self.show_epipolar and dart_mm_y is not None:
                     cv2.imwrite(f"board_vis_{timestamp}.png", board_vis)
                 print(f"Saved snapshots with timestamp {timestamp}")
             elif key == ord('r'):
                 # Reset background model
                 self.camera_bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-                    history=self.camera_bg_subtractor.getHistory(),
-                    varThreshold=self.camera_bg_subtractor.getVarThreshold(),
+                    history=30,  # Use the faster-adapting history
+                    varThreshold=35,
                     detectShadows=False
                 )
                 print("Background model reset")
