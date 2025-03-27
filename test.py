@@ -36,7 +36,7 @@ class LidarCameraVisualizer:
         # Camera configuration - MODIFIED FOR LEFT POSITION
         self.camera_position = (-350, 0)     # Camera is to the left of the board
         self.camera_vector_length = 1600     # Vector length in mm
-        self.camera_data = {"dart_mm_y": None, "dart_angle": None, "tip_pixel": None}  # Now tracking Y position
+        self.camera_data = {"dart_mm_y": None, "dart_angle": None, "tip_pixel": None}  # Now tracking tip pixel too
 
         # ROI Settings for side camera (similar to camera2 in the dual setup)
         self.camera_board_plane_y = 250  # The y-coordinate where the board surface is
@@ -57,19 +57,19 @@ class LidarCameraVisualizer:
         self.detection_persistence_counter = 0
         self.detection_persistence_frames = 30
 
-        # Camera background subtractor with improved parameters from second script
+        # Camera background subtractor with improved settings from second script
         self.camera_bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history=162,  # Reduced to adapt faster
-            varThreshold=67,  # More sensitive
+            history=162,
+            varThreshold=67,
             detectShadows=False
         )
+        
+        # Previous frame storage for frame differencing (from second script)
+        self.prev_gray = None
         
         # Frame differencing threshold from second script
         self.diff_threshold = 25
         self.min_contour_area = 30
-        
-        # Previous frame storage for frame differencing
-        self.prev_gray = None
 
         # LIDAR queues
         self.lidar1_queue = Queue()
@@ -87,7 +87,7 @@ class LidarCameraVisualizer:
         # Intersection point of camera vector with board plane
         self.camera_board_intersection = None
 
-        # CSV logging
+        # CSV logging initialization
         self.initialize_csv_logging()
 
         # Dartboard scaling
@@ -105,7 +105,7 @@ class LidarCameraVisualizer:
             "board_edge": 195,  # Added outer radius for detecting misses
         }
 
-        # --- Coefficient dictionaries remain the same ---
+        # All coefficient dictionaries included to ensure they exist
         # Coefficients for the outer single area (large segments)
         self.large_segment_coeff = {
             "14_5": {"x_correction": -1.888, "y_correction": 12.790},
@@ -515,18 +515,10 @@ class LidarCameraVisualizer:
     def start_lidar(self, script_path, queue_obj, lidar_id):
         """Start LIDAR subprocess and process data."""
         try:
-            # Split script_path into path and arguments
-            parts = script_path.split()
-            path = parts[0]
-            args = parts[1:] if len(parts) > 1 else []
-            
-            process = subprocess.Popen([path] + args, stdout=subprocess.PIPE, text=True)
+            process = subprocess.Popen([script_path], stdout=subprocess.PIPE, text=True)
             print(f"LIDAR {lidar_id} started successfully.")
             while self.running:
                 line = process.stdout.readline()
-                if not line:  # Process terminated
-                    print(f"LIDAR {lidar_id} process terminated.")
-                    break
                 if "a:" in line and "d:" in line:
                     try:
                         parts = line.strip().split()
@@ -1344,6 +1336,7 @@ class LidarCameraVisualizer:
         # Get camera data and side-to-side lean angle
         camera_y = self.camera_data.get("dart_mm_y")
         side_lean_angle = self.camera_data.get("dart_angle", 90)  # Default to vertical if unknown
+        tip_pixel = self.camera_data.get("tip_pixel")
         
         # Calculate up/down lean angle using both LIDARs if available
         up_down_lean_angle = 0
@@ -1439,9 +1432,6 @@ class LidarCameraVisualizer:
         # Update lean visualization
         self.update_lean_visualization(side_lean_angle, up_down_lean_angle, lean_confidence)
         
-        # Get tip pixel data from camera if available
-        tip_pixel = self.camera_data.get("tip_pixel")
-        
         # Log dart data to CSV
         self.log_dart_data(
             final_tip_position,
@@ -1453,17 +1443,17 @@ class LidarCameraVisualizer:
         return self.scatter1, self.scatter2, self.camera_vector, self.lidar1_vector, self.lidar2_vector, \
                self.camera_dart, self.lidar1_dart, self.lidar2_dart, self.detected_dart
 
-    def start(self):
-        """Start all threads and visualization."""
+    def run(self, lidar1_script, lidar2_script):
+        """Start all components with the specified LIDAR scripts."""
         # Start background threads
         lidar1_thread = threading.Thread(
             target=self.start_lidar, 
-            args=("/home/sam/YDLidar-SDK/lidar_scripts/lidar_reader.py --port /dev/ttyUSB0", self.lidar1_queue, 1),
+            args=(lidar1_script, self.lidar1_queue, 1),
             daemon=True
         )
         lidar2_thread = threading.Thread(
             target=self.start_lidar, 
-            args=("/home/sam/YDLidar-SDK/lidar_scripts/lidar_reader.py --port /dev/ttyUSB1", self.lidar2_queue, 2),
+            args=(lidar2_script, self.lidar2_queue, 2),
             daemon=True
         )
         camera_thread = threading.Thread(target=self.camera_detection, daemon=True)
@@ -1482,5 +1472,9 @@ class LidarCameraVisualizer:
         plt.show()
 
 if __name__ == "__main__":
+    # Use same LIDAR script paths as in your original code
+    lidar1_script = "./tri_test_lidar1"
+    lidar2_script = "./tri_test_lidar2"
+    
     visualizer = LidarCameraVisualizer()
-    visualizer.start()
+    visualizer.run(lidar1_script, lidar2_script)
