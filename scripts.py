@@ -41,6 +41,8 @@ class LidarCameraVisualizer:
         self.camera_roi_range = 30       # How much above and below to include
         self.camera_roi_top = self.camera_board_plane_y - self.camera_roi_range
         self.camera_roi_bottom = self.camera_board_plane_y + self.camera_roi_range
+        self.camera_roi_left = 100   # Example left boundary
+        self.camera_roi_right = 500  # Example right boundary
         
         # Add calibration point system
         self.camera_calibration_points = []  # List of (pixel_x, mm_y) tuples for calibration
@@ -612,7 +614,7 @@ class LidarCameraVisualizer:
             frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
             
             # NEW: Extract ROI as horizontal strip at board surface level
-            roi = frame[self.camera_roi_top:self.camera_roi_bottom, :]
+            roi = frame[self.camera_roi_top:self.camera_roi_bottom, self.camera_roi_left:self.camera_roi_right]
 
             # Background subtraction and thresholding
             gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
