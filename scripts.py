@@ -1,83 +1,58 @@
-# ROI Settings for side camera (similar to camera2 in the dual setup)
-self.camera_board_plane_y = 199  # The y-coordinate where the board surface is
-self.camera_roi_range = 30       # How much above and below to include
-self.camera_roi_top = self.camera_board_plane_y - self.camera_roi_range
-self.camera_roi_bottom = self.camera_board_plane_y + self.camera_roi_range
-self.pixel_to_mm_factor = -0.628  # Slope in mm/pixel (same as camera2_pixel_to_mm_factor)
-self.pixel_offset = 192.8        # Board y when pixel_x = 0 (same as camera2_pixel_offset)
+# Add these to the initialization method (__init__)
+self.camera_calibration_points = []  # List of (pixel_x, mm_y) tuples for calibration
+# Default linear calibration as fallback
+self.pixel_to_mm_factor = -0.628  # Slope in mm/pixel 
+self.pixel_offset = 192.8        # Board y when pixel_x = 0
 
-def camera_detection(self):
-    """Detect dart tip using the camera (now positioned on the left)."""
-    cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+def add_calibration_point(self, pixel_x, mm_y):
+    """Add a calibration point mapping pixel x-coordinate to mm y-coordinate."""
+    self.camera_calibration_points.append((pixel_x, mm_y))
+    # Sort by pixel_x for proper interpolation
+    self.camera_calibration_points.sort(key=lambda p: p[0])
+    print(f"Added calibration point: pixel_x={pixel_x}, mm_y={mm_y}")
+    print(f"Current calibration points: {self.camera_calibration_points}")
 
-    while self.running:
-        ret, frame = cap.read()
-        if not ret:
-            continue
-
-        # Rotate frame 90 degrees since camera is now on the left
-        # Adjust rotation direction based on your actual camera orientation
-        frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-        
-        # NEW: Extract ROI as horizontal strip at board surface level
-        roi = frame[self.camera_roi_top:self.camera_roi_bottom, :]
-
-        # Background subtraction and thresholding
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        fg_mask = self.camera_bg_subtractor.apply(gray)
-        
-        # More sensitive threshold
-        fg_mask = cv2.threshold(fg_mask, 180, 255, cv2.THRESH_BINARY)[1]
-        
-        # Morphological operations to enhance the dart
-        kernel = np.ones((3,3), np.uint8)
-        fg_mask = cv2.dilate(fg_mask, kernel, iterations=1)
-
-        # Reset current detection
-        self.camera_data["dart_mm_y"] = None
-        self.camera_data["dart_angle"] = None
-
-        # Detect contours
-        contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        if contours:
-            # Find the rightmost point since camera is now on the left
-            tip_contour = None
-            tip_point = None
+def pixel_to_mm(self, pixel_x):
+    """
+    Convert pixel x-coordinate to mm y-coordinate using calibration points.
+    Uses linear interpolation between known points or linear equation as fallback.
+    """
+    # If we have at least 2 calibration points, use interpolation
+    if len(self.camera_calibration_points) >= 2:
+        # Find the two nearest calibration points for interpolation
+        for i in range(len(self.camera_calibration_points) - 1):
+            p1_pixel, p1_mm = self.camera_calibration_points[i]
+            p2_pixel, p2_mm = self.camera_calibration_points[i + 1]
             
-            for contour in contours:
-                if cv2.contourArea(contour) > 50:  # Threshold for contour size
-                    x, y, w, h = cv2.boundingRect(contour)
-                    dart_pixel_x = x + w // 2  # Center x of contour
-                    
-                    # Use the board plane as the y-position
-                    roi_center_y = self.camera_board_plane_y - self.camera_roi_top
-                    
-                    if tip_contour is None:
-                        tip_contour = contour
-                        tip_point = (dart_pixel_x, roi_center_y)
-            
-            if tip_contour is not None and tip_point is not None:
-                # Calculate dart angle
-                dart_angle = self.measure_tip_angle(fg_mask, tip_point)
+            # If pixel_x is between these two points, interpolate
+            if p1_pixel <= pixel_x <= p2_pixel:
+                # Linear interpolation formula: y = y1 + (x - x1) * (y2 - y1) / (x2 - x1)
+                return p1_mm + (pixel_x - p1_pixel) * (p2_mm - p1_mm) / (p2_pixel - p1_pixel)
                 
-                # Map pixels to mm coordinates using new conversion
-                dart_mm_y = self.pixel_to_mm_factor * tip_point[0] + self.pixel_offset
-                
-                # Save data
-                self.camera_data["dart_mm_y"] = dart_mm_y
-                self.camera_data["dart_angle"] = dart_angle
-                
-                # Update persistence
-                self.last_valid_detection = self.camera_data.copy()
-                self.detection_persistence_counter = self.detection_persistence_frames
-        
-        # If no dart detected but we have a valid previous detection
-        elif self.detection_persistence_counter > 0:
-            self.detection_persistence_counter -= 1
-            if self.detection_persistence_counter > 0:
-                self.camera_data = self.last_valid_detection.copy()
-    
-    cap.release()
+        # If outside the calibration range, use the closest calibration point
+        if pixel_x < self.camera_calibration_points[0][0]:
+            return self.camera_calibration_points[0][1]
+        else:
+            return self.camera_calibration_points[-1][1]
+    else:
+        # Fallback to linear equation if not enough calibration points
+        return self.pixel_to_mm_factor * pixel_x + self.pixel_offset
+
+def clear_calibration_points(self):
+    """Clear all calibration points."""
+    self.camera_calibration_points = []
+    print("Calibration points cleared.")
+#####
+
+dart_mm_y = self.pixel_to_mm_factor * tip_point[0] + self.pixel_offset
+
+######
+
+dart_mm_y = self.pixel_to_mm(tip_point[0])
+
+#####
+
+# Add calibration points (pixel_x, mm_y)
+visualizer.add_calibration_point(100, -180)  # Leftmost point on board (-180mm) is at pixel 100
+visualizer.add_calibration_point(320, 0)     # Center point (0mm) is at pixel 320
+visualizer.add_calibration_point(540, 180)   # Rightmost point (180mm) is at pixel 540
