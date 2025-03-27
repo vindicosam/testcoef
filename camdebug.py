@@ -5,7 +5,7 @@ import time
 
 class CameraDebugger:
     def __init__(self):
-        # Camera configuration
+        # Camera configuration - HARDCODED VALUES
         self.camera_board_plane_y = 247  # The y-coordinate where the board surface is
         self.camera_roi_range = 30       # How much above and below to include
         self.camera_roi_top = self.camera_board_plane_y - self.camera_roi_range
@@ -51,11 +51,7 @@ class CameraDebugger:
         cv2.namedWindow("Board Visualization", cv2.WINDOW_NORMAL)
         cv2.namedWindow("Frame Difference", cv2.WINDOW_NORMAL)  # New window for frame differencing
         
-        # Trackbars for parameter tuning
-        cv2.createTrackbar("ROI Top", "ROI", self.camera_roi_top, 480, self.update_roi_top)
-        cv2.createTrackbar("ROI Bottom", "ROI", self.camera_roi_bottom, 480, self.update_roi_bottom)
-        cv2.createTrackbar("ROI Left", "ROI", self.camera_roi_left, 640, self.update_roi_left)
-        cv2.createTrackbar("ROI Right", "ROI", self.camera_roi_right, 640, self.update_roi_right)
+        # Trackbars for parameter tuning (ONLY non-ROI parameters)
         cv2.createTrackbar("BG History", "Background Mask", 30, 200, self.update_bg_history)
         cv2.createTrackbar("BG Threshold", "Background Mask", 35, 100, self.update_bg_threshold)
         cv2.createTrackbar("Diff Threshold", "Frame Difference", 25, 100, self.update_diff_threshold)
@@ -63,18 +59,6 @@ class CameraDebugger:
         # Thresholds for frame differencing and contour detection
         self.diff_threshold = 25
         self.min_contour_area = 30  # Reduced from 50
-        
-    def update_roi_top(self, value):
-        self.camera_roi_top = value
-        
-    def update_roi_bottom(self, value):
-        self.camera_roi_bottom = value
-    
-    def update_roi_left(self, value):
-        self.camera_roi_left = value
-        
-    def update_roi_right(self, value):
-        self.camera_roi_right = value
         
     def update_bg_history(self, value):
         # Recreate the background subtractor with new history parameter
@@ -310,7 +294,7 @@ class CameraDebugger:
                               (0, 255, 0), 2)
                 cv2.imshow("Camera Feed", original_vis)
             
-            # Extract ROI
+            # Extract ROI with fixed dimensions
             roi = frame[self.camera_roi_top:self.camera_roi_bottom, 
                         self.camera_roi_left:self.camera_roi_right]
             
@@ -318,7 +302,8 @@ class CameraDebugger:
             gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
             
             # ---- Enhanced motion detection using frame differencing ----
-            if self.prev_gray is None:
+            if self.prev_gray is None or self.prev_gray.shape != gray.shape:
+                # Initialize or reset previous frame if shapes don't match
                 self.prev_gray = gray.copy()
             
             # Calculate absolute difference between current and previous frame
@@ -460,6 +445,8 @@ class CameraDebugger:
                     varThreshold=35,
                     detectShadows=False
                 )
+                # Also reset frame difference
+                self.prev_gray = gray.copy()
                 print("Background model reset")
             
             frame_count += 1
