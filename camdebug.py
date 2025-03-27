@@ -408,15 +408,16 @@ class CameraDebugger:
                     self.detection_persistence_counter = self.detection_persistence_frames
                     
                     # Print detection data
+                    angle_str = f"{dart_angle:.1f}°" if dart_angle is not None else "None"
                     print(f"Frame {frame_count}: Detected dart - pixel_x: {global_pixel_x}, " + 
-                          f"angle: {dart_angle:.1f if dart_angle else None}°, mm_y: {dart_mm_y:.1f}mm")
+                          f"angle: {angle_str}, mm_y: {dart_mm_y:.1f}mm")
             
             # If no dart detected but we have a valid previous detection
             elif self.detection_persistence_counter > 0:
                 self.detection_persistence_counter -= 1
                 if self.detection_persistence_counter > 0:
                     self.camera_data = self.last_valid_detection.copy()
-                    angle_str = f"{self.camera_data['dart_angle']:.1f}°" if self.camera_data['dart_angle'] else "None"
+                    angle_str = f"{self.camera_data['dart_angle']:.1f}°" if self.camera_data['dart_angle'] is not None else "None"
                     print(f"Frame {frame_count}: Using persistence - " + 
                           f"pixel_x: {self.camera_data['dart_pixel_x']}, " +
                           f"angle: {angle_str}, " +
