@@ -28,6 +28,20 @@ class DualCameraEpipolarTrainer:
         self.cam2_roi_top = self.cam2_board_plane_y - self.cam2_roi_range
         self.cam2_roi_bottom = self.cam2_board_plane_y + self.cam2_roi_range
 
+        # Initialize calibration points dictionary first
+        self.calibration_points = {
+            # Format: (board_x, board_y): (cam1_pixel_x, cam2_pixel_x)
+            (0, 0): (290, 307),
+            (-171, 0): (506, 307),
+            (171, 0): (68, 307),
+            (0, 171): (290, 34),
+            (0, -171): (290, 578),
+            (90, 50): (151, 249),
+            (-20, 103): (327, 131),
+            (20, -100): (277, 459),
+            (90, -50): (359, 406),
+        }
+
         # Define additional calibration points from segments
         # Format: board_x, board_y, cam1_pixel_x, cam2_pixel_x
         additional_calibration_points = [
@@ -42,7 +56,7 @@ class DualCameraEpipolarTrainer:
             (-50, -88, 337, 462),   # Treble 7
             # Segment 9 - double and treble
             (121, 118, 534, 202),   # Double 9
-            (-90, -47, 419, 205)    # Treble 9 (note: there appears to be a typo in x coordinate, assumed to be -90)
+            (-90, -47, 419, 205)    # Treble 9
         ]
         
         # Add these to existing calibration points
@@ -121,7 +135,7 @@ class DualCameraEpipolarTrainer:
         self.cam2_vector = None  # Vector from cam2 through detected point on board
         self.final_tip = None    # Intersection of the vectors
         
-        # Known board segments with coordinates (added)
+        # Known board segments with coordinates
         self.board_segments = {
             4: (90, 50),
             5: (-20, 103),
@@ -132,29 +146,6 @@ class DualCameraEpipolarTrainer:
             15: (119, -117),    # Double 15
             7: (-118, -121),    # Double 7
             9: (121, 118)       # Double 9
-        }
-        
-        # Calibration points for reference (added)
-        self.calibration_points = {
-            # Format: (board_x, board_y): (cam1_pixel_x, cam2_pixel_x)
-            (0, 0): (290, 307),
-            (-171, 0): (506, 307),
-            (171, 0): (68, 307),
-            (0, 171): (290, 34),
-            (0, -171): (290, 578),
-            (90, 50): (151, 249),
-            (-20, 103): (327, 131),
-            (20, -100): (277, 459),
-            (90, -50): (359, 406),
-            # Add new calibration points from provided data
-            (114, 121): (41, 170),      # Double 18
-            (48, 86): (209, 189),       # Treble 18
-            (119, -117): (179, 441),    # Double 15
-            (86, -48): (194, 364),      # Treble 15
-            (-118, -121): (399, 595),   # Double 7
-            (-50, -88): (337, 462),     # Treble 7
-            (121, 118): (534, 202),     # Double 9
-            (-90, -47): (419, 205)      # Treble 9
         }
 
     def compute_line_intersection(self, p1, p2, p3, p4):
