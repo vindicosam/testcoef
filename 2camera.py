@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import math
+from bisect import bisect_left
 
 class DualCameraEpipolarTrainer:
     def __init__(self, cam_index1=0, cam_index2=2):
@@ -28,7 +29,7 @@ class DualCameraEpipolarTrainer:
         self.cam2_roi_top = self.cam2_board_plane_y - self.cam2_roi_range
         self.cam2_roi_bottom = self.cam2_board_plane_y + self.cam2_roi_range
 
-        # Initialize calibration points dictionary first
+        # Initialize calibration points dictionary
         self.calibration_points = {
             # Format: (board_x, board_y): (cam1_pixel_x, cam2_pixel_x)
             (0, 0): (290, 307),
@@ -64,54 +65,31 @@ class DualCameraEpipolarTrainer:
             board_x, board_y, cam1_pixel_x, cam2_pixel_x = point
             self.calibration_points[(board_x, board_y)] = (cam1_pixel_x, cam2_pixel_x)
 
-        # Recalculate the calibration using all available data points
-        # Prepare data for linear regression (cam1 - x coordinate mapping)
-        cam1_x_values = []
-        cam1_board_x_values = []
+        # Create sorted mapping tables for direct interpolation
+        # Camera 1: pixel_x to board_x mapping
+        self.cam1_pixel_to_board_mapping = []
+        # Camera 2: pixel_x to board_y mapping
+        self.cam2_pixel_to_board_mapping = []
         
-        # Prepare data for linear regression (cam2 - y coordinate mapping)
-        cam2_x_values = []
-        cam2_board_y_values = []
-        
+        # Fill the mapping tables
         for (board_x, board_y), (cam1_pixel_x, cam2_pixel_x) in self.calibration_points.items():
-            # For camera 1, we care about mapping x-coordinates
-            cam1_x_values.append(cam1_pixel_x)
-            cam1_board_x_values.append(board_x)
-            
-            # For camera 2, we care about mapping y-coordinates
-            cam2_x_values.append(cam2_pixel_x)
-            cam2_board_y_values.append(board_y)
-            
-        # Calculate linear regression for camera 1 (x-coordinate mapping)
-        # We want to find the line y = mx + b that best fits the data
-        # In our case, board_x = m * cam1_pixel_x + b
-        if len(cam1_x_values) > 1:
-            cam1_x_values = np.array(cam1_x_values)
-            cam1_board_x_values = np.array(cam1_board_x_values)
-            
-            # Use polyfit to find the line of best fit
-            # The first parameter is the degree (1 for linear regression)
-            cam1_slope, cam1_intercept = np.polyfit(cam1_x_values, cam1_board_x_values, 1)
-            self.camera1_pixel_to_mm_factor = cam1_slope
-            self.camera1_pixel_offset = cam1_intercept
-        else:
-            # Use the original calibration if we don't have enough points
-            self.camera1_pixel_to_mm_factor = -0.782  # Slope in mm/pixel
-            self.camera1_pixel_offset = 226.8         # Board x when pixel_x = 0
+            # We only need x mapping for camera 1
+            self.cam1_pixel_to_board_mapping.append((cam1_pixel_x, board_x))
+            # We only need y mapping for camera 2
+            self.cam2_pixel_to_board_mapping.append((cam2_pixel_x, board_y))
         
-        # Calculate linear regression for camera 2 (y-coordinate mapping)
-        if len(cam2_x_values) > 1:
-            cam2_x_values = np.array(cam2_x_values)
-            cam2_board_y_values = np.array(cam2_board_y_values)
-            
-            # Use polyfit to find the line of best fit
-            cam2_slope, cam2_intercept = np.polyfit(cam2_x_values, cam2_board_y_values, 1)
-            self.camera2_pixel_to_mm_factor = cam2_slope
-            self.camera2_pixel_offset = cam2_intercept
-        else:
-            # Use the original calibration if we don't have enough points
-            self.camera2_pixel_to_mm_factor = -0.628  # Slope in mm/pixel
-            self.camera2_pixel_offset = 192.8         # Board y when pixel_x = 0
+        # Sort the mappings by pixel values for efficient lookup
+        self.cam1_pixel_to_board_mapping.sort(key=lambda x: x[0])
+        self.cam2_pixel_to_board_mapping.sort(key=lambda x: x[0])
+        
+        # Print mapping tables for debugging
+        print("Camera 1 pixel-to-board mapping (sorted by pixel_x):")
+        for pixel_x, board_x in self.cam1_pixel_to_board_mapping:
+            print(f"  Pixel: {pixel_x} -> Board X: {board_x}")
+        
+        print("Camera 2 pixel-to-board mapping (sorted by pixel_x):")
+        for pixel_x, board_y in self.cam2_pixel_to_board_mapping:
+            print(f"  Pixel: {pixel_x} -> Board Y: {board_y}")
 
         # Background subtractors
         self.bg_subtractor1 = cv2.createBackgroundSubtractorMOG2(history=150, varThreshold=20, detectShadows=False)
@@ -147,6 +125,38 @@ class DualCameraEpipolarTrainer:
             7: (-118, -121),    # Double 7
             9: (121, 118)       # Double 9
         }
+
+    def interpolate_value(self, pixel_value, mapping_table):
+        """
+        Interpolate a value using the provided mapping table.
+        mapping_table is a list of (pixel_value, board_coordinate) pairs sorted by pixel_value.
+        """
+        # Handle edge cases
+        if not mapping_table:
+            return None
+        
+        # If pixel value is outside the range of our mapping, use the nearest edge value
+        if pixel_value <= mapping_table[0][0]:
+            return mapping_table[0][1]
+        if pixel_value >= mapping_table[-1][0]:
+            return mapping_table[-1][1]
+        
+        # Find position where pixel_value would be inserted to maintain sorted order
+        pos = bisect_left([x[0] for x in mapping_table], pixel_value)
+        
+        # If exact match
+        if pos < len(mapping_table) and mapping_table[pos][0] == pixel_value:
+            return mapping_table[pos][1]
+        
+        # Need to interpolate between pos-1 and pos
+        lower_pixel, lower_value = mapping_table[pos-1]
+        upper_pixel, upper_value = mapping_table[pos]
+        
+        # Linear interpolation
+        ratio = (pixel_value - lower_pixel) / (upper_pixel - lower_pixel)
+        interpolated_value = lower_value + ratio * (upper_value - lower_value)
+        
+        return interpolated_value
 
     def compute_line_intersection(self, p1, p2, p3, p4):
         """
@@ -186,11 +196,13 @@ class DualCameraEpipolarTrainer:
                 break
 
         if dart_pixel_x is not None:
-            # Apply calibration for cam1 to get board x-coordinate
-            board_x = self.camera1_pixel_to_mm_factor * dart_pixel_x + self.camera1_pixel_offset
+            # Use interpolation to get board x-coordinate directly from pixel value
+            board_x = self.interpolate_value(dart_pixel_x, self.cam1_pixel_to_board_mapping)
+            
             # Store vector info - we know this passes through (board_x, 0) on the board
             self.cam1_vector = (board_x, 0)
-            # Add calibration debugging info to display
+            
+            # Add debugging info to display
             cv2.putText(roi, f"Board X: {board_x:.1f}mm", (10, 20), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
         else:
@@ -225,11 +237,13 @@ class DualCameraEpipolarTrainer:
                 break
 
         if dart_pixel_x is not None:
-            # Apply calibration for cam2 to get board y-coordinate
-            board_y = self.camera2_pixel_to_mm_factor * dart_pixel_x + self.camera2_pixel_offset
+            # Use interpolation to get board y-coordinate directly from pixel value
+            board_y = self.interpolate_value(dart_pixel_x, self.cam2_pixel_to_board_mapping)
+            
             # Store vector info - we know this passes through (0, board_y) on the board
             self.cam2_vector = (0, board_y)
-            # Add calibration debugging info to display
+            
+            # Add debugging info to display
             cv2.putText(roi, f"Board Y: {board_y:.1f}mm", (10, 20), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
         else:
@@ -464,8 +478,6 @@ class DualCameraEpipolarTrainer:
         cap2.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
 
         print("Press 'q' to exit.")
-        print(f"Camera 1 Calibration - Factor: {self.camera1_pixel_to_mm_factor:.4f}, Offset: {self.camera1_pixel_offset:.1f}")
-        print(f"Camera 2 Calibration - Factor: {self.camera2_pixel_to_mm_factor:.4f}, Offset: {self.camera2_pixel_offset:.1f}")
         
         while True:
             ret1, frame1 = cap1.read()
