@@ -1,5 +1,5 @@
-from matplotlib.animation 
-import FuncAnimation
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 import numpy as np
 from queue import Queue
 import threading
@@ -1480,7 +1480,7 @@ class LidarCameraVisualizer:
             self.detected_dart.set_data([], [])
         
         # Update lean text
-        lean_text = f"Side Lean: {side_lean_angle:.1f}°\nUp/Down: {up_down_lean_angle:.1f}°"
+        lean_text = f"Side Lean: {side_lean_angle:.1f if side_lean_angle is not None else 'N/A'}°\nUp/Down: {up_down_lean_angle:.1f if up_down_lean_angle is not None else 'N/A'}°"
         self.lean_text.set_text(lean_text)
         
         # Return all the artists that need to be redrawn
