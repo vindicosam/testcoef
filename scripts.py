@@ -1,5 +1,5 @@
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
+from matplotlib.animation 
+import FuncAnimation
 import numpy as np
 from queue import Queue
 import threading
@@ -191,7 +191,7 @@ class LidarCameraVisualizer:
             "2_4": {"x_correction": -0.837, "y_correction": 0.118},
             "10_5": {"x_correction": -3.798, "y_correction": -0.596}
         }
-# Coefficients for the double ring area
+        # Coefficients for the double ring area
         self.doubles_coeff = {
             "1_1": {"x_correction": 3.171, "y_correction": 0.025},
             "14_5": {"x_correction": 1.920, "y_correction": 6.191},
@@ -439,7 +439,8 @@ class LidarCameraVisualizer:
             return f"S{base_score}"  # Single
         else:
             return "Outside"
-def get_score_description(self, score):
+
+    def get_score_description(self, score):
         """Return a human-readable description of the score."""
         if score == "B":
             return "Bullseye! Worth 50 points."
@@ -576,7 +577,8 @@ def get_score_description(self, score):
         self.lean_text = self.ax.text(-380, 380, "", fontsize=9)
         
         self.ax.legend(loc="upper right", fontsize=8)
-def update_dartboard_image(self):
+
+    def update_dartboard_image(self):
         """Update the dartboard image extent."""
         scaled_extent = [-170 * self.board_scale_factor, 170 * self.board_scale_factor,
                          -170 * self.board_scale_factor, 170 * self.board_scale_factor]
@@ -840,7 +842,8 @@ def update_dartboard_image(self):
             if distance <= radius:
                 return True, name
         return False, None
-def apply_calibration_correction(self, x, y):
+
+    def apply_calibration_correction(self, x, y):
         """Apply improved calibration correction using weighted interpolation."""
         if not self.calibration_points:
             return x, y
@@ -1104,7 +1107,8 @@ def apply_calibration_correction(self, x, y):
         lean_angle = max(-self.MAX_UP_DOWN_LEAN, min(self.MAX_UP_DOWN_LEAN, lean_angle))
         
         return lean_angle, confidence
-def project_lidar_point_with_3d_lean(self, lidar_point, lidar_height, side_lean_angle, up_down_lean_angle, camera_y):
+
+    def project_lidar_point_with_3d_lean(self, lidar_point, lidar_height, side_lean_angle, up_down_lean_angle, camera_y):
         """
         Project a LIDAR detection point to account for both side-to-side and up/down lean.
         
@@ -1291,14 +1295,214 @@ def project_lidar_point_with_3d_lean(self, lidar_point, lidar_height, side_lean_
 
     def update_lean_visualization(self, side_lean_angle, up_down_lean_angle, lean_confidence):
         """Update the visualization of lean angles."""
-        # Implementation details for lean visualization
-        pass
+        # Update or create the arrow for visualization
+        arrow_length = 40
+        arrow_x = -350
+        arrow_y = 350
         
+        # Calculate arrow components based on lean angles
+        if side_lean_angle is not None and up_down_lean_angle is not None:
+            # Convert from degrees to radians for math functions
+            side_lean_rad = np.radians(90 - side_lean_angle)  # 90° is vertical
+            up_down_lean_rad = np.radians(up_down_lean_angle)
+            
+            # X component affected by both side and up/down lean
+            dx = arrow_length * np.sin(side_lean_rad) * np.cos(up_down_lean_rad)
+            # Y component affected by side lean
+            dy = arrow_length * np.cos(side_lean_rad)
+            # Z component (into screen) affected by up/down lean - not directly shown in 2D
+            
+            # Remove old arrow if exists
+            if self.lean_arrow:
+                self.lean_arrow.remove()
+            
+            # Create new arrow
+            self.lean_arrow = self.ax.arrow(
+                arrow_x, arrow_y, dx, dy, 
+                head_width=8, head_length=10, 
+                fc='purple', ec='purple', alpha=0.7,
+                length_includes_head=True
+            )
+            
+            # Add confidence level to visualization
+            if self.arrow_text:
+                self.arrow_text.remove()
+            
+            self.arrow_text = self.ax.text(
+                arrow_x + dx + 10, arrow_y + dy, 
+                f"Conf: {lean_confidence:.2f}", 
+                fontsize=8, color='purple'
+            )
+        
+        # If no data, show vertical arrow
+        elif self.lean_arrow is None:
+            self.lean_arrow = self.ax.arrow(
+                arrow_x, arrow_y, 0, arrow_length, 
+                head_width=8, head_length=10, 
+                fc='gray', ec='gray', alpha=0.5,
+                length_includes_head=True
+            )
+
     def update_plot(self, frame):
         """Update plot data with enhanced 3D lean correction and CSV logging."""
-        # Implementation details for plot updating
-        pass
-def run(self, lidar1_script, lidar2_script):
+        # Process LIDAR data
+        lidar1_points_x = []
+        lidar1_points_y = []
+        lidar2_points_x = []
+        lidar2_points_y = []
+        
+        # Process LIDAR 1 queue
+        while not self.lidar1_queue.empty():
+            angle, distance = self.lidar1_queue.get()
+            x, y = self.polar_to_cartesian(angle, distance, self.lidar1_pos, 
+                                        self.lidar1_rotation, self.lidar1_mirror)
+            if x is not None and y is not None:
+                # Filter points by radii
+                in_range, _ = self.filter_points_by_radii(x, y)
+                if in_range:
+                    lidar1_points_x.append(x)
+                    lidar1_points_y.append(y)
+                    self.lidar1_recent_points.append((x, y))
+        
+        # Process LIDAR 2 queue
+        while not self.lidar2_queue.empty():
+            angle, distance = self.lidar2_queue.get()
+            x, y = self.polar_to_cartesian(angle, distance, self.lidar2_pos, 
+                                        self.lidar2_rotation, self.lidar2_mirror)
+            if x is not None and y is not None:
+                # Filter points by radii
+                in_range, _ = self.filter_points_by_radii(x, y)
+                if in_range:
+                    lidar2_points_x.append(x)
+                    lidar2_points_y.append(y)
+                    self.lidar2_recent_points.append((x, y))
+        
+        # Keep only the most recent points
+        self.lidar1_recent_points = self.lidar1_recent_points[-self.max_recent_points:]
+        self.lidar2_recent_points = self.lidar2_recent_points[-self.max_recent_points:]
+        
+        # Get the camera data
+        camera_y = self.camera_data["dart_mm_y"]
+        side_lean_angle = self.camera_data["dart_angle"]
+        
+        # Calculate lean angle
+        up_down_lean_angle = 0
+        lean_confidence = 0
+        
+        if len(self.lidar1_recent_points) > 0 and len(self.lidar2_recent_points) > 0:
+            lidar1_point = self.lidar1_recent_points[-1]
+            lidar2_point = self.lidar2_recent_points[-1]
+            up_down_lean_angle, lean_confidence = self.detect_up_down_lean(lidar1_point, lidar2_point)
+        
+        # Update lean visualization
+        self.update_lean_visualization(side_lean_angle, up_down_lean_angle, lean_confidence)
+        
+        # Find where the camera vector intersects with the board
+        camera_point = self.find_camera_board_intersection(camera_y)
+        
+        # Project LIDAR points with 3D lean correction
+        lidar1_projected = None
+        lidar2_projected = None
+        
+        if len(self.lidar1_recent_points) > 0:
+            lidar1_point = self.lidar1_recent_points[-1]
+            lidar1_projected = self.project_lidar_point_with_3d_lean(
+                lidar1_point, self.lidar1_height, side_lean_angle, 
+                up_down_lean_angle, camera_y
+            )
+        
+        if len(self.lidar2_recent_points) > 0:
+            lidar2_point = self.lidar2_recent_points[-1]
+            lidar2_projected = self.project_lidar_point_with_3d_lean(
+                lidar2_point, self.lidar2_height, side_lean_angle, 
+                up_down_lean_angle, camera_y
+            )
+        
+        # Calculate final tip position
+        final_tip_position = self.calculate_final_tip_position(
+            camera_point, lidar1_projected, lidar2_projected
+        )
+        
+        # Apply segment-specific coefficients
+        if final_tip_position is not None:
+            x, y = final_tip_position
+            x, y = self.apply_segment_coefficients(x, y)
+            x, y = self.apply_calibration_correction(x, y)
+            final_tip_position = (x, y)
+        
+        # Log data to CSV
+        self.log_dart_data(
+            final_tip_position, 
+            self.camera_data["tip_pixel"], 
+            side_lean_angle, 
+            up_down_lean_angle
+        )
+        
+        # Update plot with new data
+        self.scatter1.set_data(lidar1_points_x, lidar1_points_y)
+        self.scatter2.set_data(lidar2_points_x, lidar2_points_y)
+        
+        # Update camera vector
+        if camera_point is not None:
+            self.camera_vector.set_data(
+                [self.camera_position[0], camera_point[0]],
+                [self.camera_position[1], camera_point[1]]
+            )
+            self.camera_dart.set_data([camera_point[0]], [camera_point[1]])
+        else:
+            self.camera_vector.set_data([], [])
+            self.camera_dart.set_data([], [])
+        
+        # Update LIDAR projections
+        if lidar1_projected is not None:
+            self.lidar1_dart.set_data([lidar1_projected[0]], [lidar1_projected[1]])
+        else:
+            self.lidar1_dart.set_data([], [])
+            
+        if lidar2_projected is not None:
+            self.lidar2_dart.set_data([lidar2_projected[0]], [lidar2_projected[1]])
+        else:
+            self.lidar2_dart.set_data([], [])
+        
+        # Update final tip position
+        if final_tip_position is not None:
+            self.detected_dart.set_data([final_tip_position[0]], [final_tip_position[1]])
+            
+            # Update score text if point is on board
+            score = self.xy_to_dartboard_score(final_tip_position[0], final_tip_position[1])
+            if score != "Outside":
+                description = self.get_score_description(score)
+                if self.score_text:
+                    self.score_text.set_text(description)
+                else:
+                    self.score_text = self.ax.text(-380, 360, description, fontsize=12, color='red')
+        else:
+            self.detected_dart.set_data([], [])
+        
+        # Update lean text
+        lean_text = f"Side Lean: {side_lean_angle:.1f}°\nUp/Down: {up_down_lean_angle:.1f}°"
+        self.lean_text.set_text(lean_text)
+        
+        # Return all the artists that need to be redrawn
+        artists = [
+            self.scatter1, self.scatter2, 
+            self.camera_vector, self.camera_dart,
+            self.lidar1_dart, self.lidar2_dart, 
+            self.detected_dart, self.lean_text
+        ]
+        
+        if hasattr(self, 'score_text') and self.score_text:
+            artists.append(self.score_text)
+        
+        if hasattr(self, 'lean_arrow') and self.lean_arrow:
+            artists.append(self.lean_arrow)
+        
+        if hasattr(self, 'arrow_text') and self.arrow_text:
+            artists.append(self.arrow_text)
+            
+        return artists
+
+    def run(self, lidar1_script, lidar2_script):
         """Start all components with the specified LIDAR scripts."""
         # Start background threads
         lidar1_thread = threading.Thread(
@@ -1362,6 +1566,64 @@ def run(self, lidar1_script, lidar2_script):
         else:
             print(f"Invalid segment number: {segment}. Must be between 1-20.")
             return 0.0
+            
+    def load_coefficient_scaling(self, filename="coefficient_scaling.json"):
+        """Load coefficient scaling configuration from a JSON file."""
+        try:
+            if os.path.exists(filename):
+                with open(filename, 'r') as f:
+                    loaded_scaling = json.load(f)
+                    
+                # Convert string keys back to integers
+                self.coefficient_scaling = {int(k): v for k, v in loaded_scaling.items()}
+                print(f"Coefficient scaling loaded from {filename}")
+                return True
+            else:
+                print(f"Scaling file {filename} not found, using defaults")
+                return False
+        except Exception as e:
+            print(f"Error loading coefficient scaling: {e}")
+            return False
+
+    def save_coefficient_scaling(self, filename="coefficient_scaling.json"):
+        """Save the current coefficient scaling configuration to a JSON file."""
+        try:
+            with open(filename, 'w') as f:
+                json.dump(self.coefficient_scaling, f, indent=2)
+            print(f"Coefficient scaling saved to {filename}")
+            return True
+        except Exception as e:
+            print(f"Error saving coefficient scaling: {e}")
+            return False
+
+    def load_segment_radial_offsets(self, filename="segment_offsets.json"):
+        """Load segment radial offsets from a JSON file."""
+        try:
+            if os.path.exists(filename):
+                with open(filename, 'r') as f:
+                    loaded_offsets = json.load(f)
+                    
+                # Convert string keys back to integers
+                self.segment_radial_offsets = {int(k): v for k, v in loaded_offsets.items()}
+                print(f"Segment radial offsets loaded from {filename}")
+                return True
+            else:
+                print(f"Segment offsets file {filename} not found, using defaults")
+                return False
+        except Exception as e:
+            print(f"Error loading segment radial offsets: {e}")
+            return False
+
+    def save_segment_radial_offsets(self, filename="segment_offsets.json"):
+        """Save the current segment radial offsets to a JSON file."""
+        try:
+            with open(filename, 'w') as f:
+                json.dump(self.segment_radial_offsets, f, indent=2)
+            print(f"Segment radial offsets saved to {filename}")
+            return True
+        except Exception as e:
+            print(f"Error saving segment radial offsets: {e}")
+            return False
         
     # Calibration mode methods (added from second script)
     def calibration_mode(self):
@@ -1477,7 +1739,8 @@ def run(self, lidar1_script, lidar2_script):
                     
             except ValueError:
                 print("Scale must be a numeric value")
-# NEW: Segment radial offset calibration
+                
+    # NEW: Segment radial offset calibration
     def _calibrate_segment_radial_offsets(self):
         """Interactive calibration for segment radial offsets."""
         print("Segment Radial Offset Calibration Mode")
@@ -1527,8 +1790,7 @@ def run(self, lidar1_script, lidar2_script):
                         print("Segment must be a number between 1-20 or 'all'")
                         continue
                 
-                
-# Update offsets
+                # Update offsets
                 for segment in segments:
                     self.segment_radial_offsets[segment] = offset
                     
@@ -1540,67 +1802,6 @@ def run(self, lidar1_script, lidar2_script):
                     
             except ValueError:
                 print("Offset must be a numeric value")
-    
-    def save_coefficient_scaling(self, filename="coefficient_scaling.json"):
-        """Save the current coefficient scaling configuration to a JSON file."""
-        try:
-            with open(filename, 'w') as f:
-                json.dump(self.coefficient_scaling, f, indent=2)
-            print(f"Coefficient scaling saved to {filename}")
-            return True
-        except Exception as e:
-            print(f"Error saving coefficient scaling: {e}")
-            return False
-    
-    def load_coefficient_scaling(self, filename="coefficient_scaling.json"):
-        """Load coefficient scaling configuration from a JSON file."""
-        try:
-            if os.path.exists(filename):
-                with open(filename, 'r') as f:
-                    loaded_scaling = json.load(f)
-                    
-                # Convert string keys back to integers
-                self.coefficient_scaling = {int(k): v for k, v in loaded_scaling.items()}
-                print(f"Coefficient scaling loaded from {filename}")
-                return True
-            else:
-                print(f"Scaling file {filename} not found, using defaults")
-                return False
-        except Exception as e:
-            print(f"Error loading coefficient scaling: {e}")
-            return False
-    
-    # NEW: Methods to save and load segment radial offsets
-    def save_segment_radial_offsets(self, filename="segment_offsets.json"):
-        """Save the current segment radial offsets to a JSON file."""
-        try:
-            with open(filename, 'w') as f:
-                json.dump(self.segment_radial_offsets, f, indent=2)
-            print(f"Segment radial offsets saved to {filename}")
-            return True
-        except Exception as e:
-            print(f"Error saving segment radial offsets: {e}")
-            return False
-    
-    def load_segment_radial_offsets(self, filename="segment_offsets.json"):
-        """Load segment radial offsets from a JSON file."""
-        try:
-            if os.path.exists(filename):
-                with open(filename, 'r') as f:
-                    loaded_offsets = json.load(f)
-                    
-                # Convert string keys back to integers
-                self.segment_radial_offsets = {int(k): v for k, v in loaded_offsets.items()}
-                print(f"Segment radial offsets loaded from {filename}")
-                return True
-            else:
-                print(f"Segment offsets file {filename} not found, using defaults")
-                return False
-        except Exception as e:
-            print(f"Error loading segment radial offsets: {e}")
-            return False
-
-
 if __name__ == "__main__":
     # Use same LIDAR script paths as in your original code
     lidar1_script = "./tri_test_lidar1"
@@ -1610,7 +1811,7 @@ if __name__ == "__main__":
     
     # Try to load settings from files
     visualizer.load_coefficient_scaling()
-    visualizer.load_segment_radial_offsets()  # NEW: Load segment offsets
+    visualizer.load_segment_radial_offsets()
     
     # Parse command line arguments
     if len(sys.argv) > 1:
@@ -1620,7 +1821,7 @@ if __name__ == "__main__":
             save = input("Save settings? (y/n): ")
             if save.lower() == 'y':
                 visualizer.save_coefficient_scaling()
-                visualizer.save_segment_radial_offsets()  # NEW: Save segment offsets
+                visualizer.save_segment_radial_offsets()
         elif sys.argv[1] == "--help":
             print("Usage:")
             print("  python script.py                  - Run the program normally")
