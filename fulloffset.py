@@ -954,6 +954,7 @@ class LidarCameraVisualizer:
         if angle_deg < 0:
             angle_deg += 360
         segment = int(((angle_deg + 9) % 360) / 18) + 1
+
         
         # Determine the ring type based on distance from center
         dist = math.sqrt(x*x + y*y)
@@ -973,7 +974,16 @@ class LidarCameraVisualizer:
         else:
             # Outside board edge or miss, no correction
             return x, y
-        
+        # Apply segment offset if nonzero
+        radial_offset = self.segment_radial_offsets[segment][ring_type]
+        if radial_offset != 0.0:
+            magnitude = math.sqrt(x*x + y*y)
+            if magnitude > 0:
+                unit_x = x / magnitude
+                unit_y = y / magnitude
+                x += unit_x * radial_offset
+                y += unit_y * radial_offset
+
         # Apply radial offset specific to this segment and ring type
         radial_offset = self.segment_radial_offsets[segment][ring_type]
         if radial_offset != 0.0:
