@@ -612,7 +612,7 @@ class LidarCameraVisualizer:
             tip_point: Detected tip coordinates (x,y)
             
         Returns:
-            angle: Angle in degrees (90° = vertical) or None if angle couldn't be calculated
+            angle: Angle in degrees (90Â° = vertical) or None if angle couldn't be calculated
         """
         if tip_point is None:
             return None
@@ -973,7 +973,7 @@ class LidarCameraVisualizer:
         if dist <= self.radii["outer_bull"]:
             return x, y
 
-        # Determine segment number from angle (using offset of 9° as before)
+        # Determine segment number from angle (using offset of 9Â° as before)
         # We recalculate after applying the radial offset
         angle_deg = math.degrees(math.atan2(y, x))
         if angle_deg < 0:
@@ -1034,7 +1034,7 @@ class LidarCameraVisualizer:
             lidar2_point: (x, y) position from LIDAR 2
             
         Returns:
-            lean_angle: Estimated lean angle in degrees (0° = vertical, positive = up, negative = down)
+            lean_angle: Estimated lean angle in degrees (0Â° = vertical, positive = up, negative = down)
             confidence: Confidence level in the lean detection (0-1)
         """
         # Case 1: Both LIDARs active - use standard X-difference calculation
@@ -1115,8 +1115,8 @@ class LidarCameraVisualizer:
         Args:
             lidar_point: (x, y) position of LIDAR detection
             lidar_height: height of the LIDAR beam above board in mm
-            side_lean_angle: angle of dart from vertical in degrees (90° = vertical, from camera)
-            up_down_lean_angle: angle of up/down lean in degrees (0° = vertical)
+            side_lean_angle: angle of dart from vertical in degrees (90Â° = vertical, from camera)
+            up_down_lean_angle: angle of up/down lean in degrees (0Â° = vertical)
             camera_y: Y-coordinate from camera detection
             
         Returns:
@@ -1138,7 +1138,7 @@ class LidarCameraVisualizer:
         adjusted_y = original_y
         if camera_y is not None:
             # Calculate side-to-side lean adjustment (similar to your existing code)
-            # Convert to 0-1 scale where 0 is horizontal (0°) and 1 is vertical (90°)
+            # Convert to 0-1 scale where 0 is horizontal (0Â°) and 1 is vertical (90Â°)
             side_lean_factor = side_lean_angle / 90.0
             inverse_side_lean = 1.0 - side_lean_factor
             
@@ -1303,7 +1303,7 @@ class LidarCameraVisualizer:
         # Calculate arrow components based on lean angles
         if side_lean_angle is not None and up_down_lean_angle is not None:
             # Convert from degrees to radians for math functions
-            side_lean_rad = np.radians(90 - side_lean_angle)  # 90° is vertical
+            side_lean_rad = np.radians(90 - side_lean_angle)  # 90Â° is vertical
             up_down_lean_rad = np.radians(up_down_lean_angle)
             
             # X component affected by both side and up/down lean
@@ -1482,12 +1482,12 @@ class LidarCameraVisualizer:
         # Update lean text
         # Properly handle None values in f-string formatting
         if side_lean_angle is not None:
-            side_lean_str = f"{side_lean_angle:.1f}°"
+            side_lean_str = f"{side_lean_angle:.1f}Â°"
         else:
             side_lean_str = "N/A"
     
         if up_down_lean_angle is not None:
-            up_down_lean_str = f"{up_down_lean_angle:.1f}°"
+            up_down_lean_str = f"{up_down_lean_angle:.1f}Â°"
         else:
             up_down_lean_str = "N/A"
     
@@ -1659,8 +1659,8 @@ class LidarCameraVisualizer:
     def _calibrate_lidar_rotation(self):
         """Interactive calibration for LIDAR rotation."""
         print("LIDAR Rotation Calibration Mode")
-        print(f"Current LIDAR1 rotation: {self.lidar1_rotation}°")
-        print(f"Current LIDAR2 rotation: {self.lidar2_rotation}°")
+        print(f"Current LIDAR1 rotation: {self.lidar1_rotation}Â°")
+        print(f"Current LIDAR2 rotation: {self.lidar2_rotation}Â°")
         
         while True:
             cmd = input("Enter L1+/L1-/L2+/L2- followed by degrees (e.g., L1+0.5) or 'q' to quit: ")
@@ -1677,8 +1677,8 @@ class LidarCameraVisualizer:
                 elif cmd.startswith("L2-"):
                     self.lidar2_rotation -= float(cmd[3:])
                     
-                print(f"Updated LIDAR1 rotation: {self.lidar1_rotation}°")
-                print(f"Updated LIDAR2 rotation: {self.lidar2_rotation}°")
+                print(f"Updated LIDAR1 rotation: {self.lidar1_rotation}Â°")
+                print(f"Updated LIDAR2 rotation: {self.lidar2_rotation}Â°")
             except:
                 print("Invalid command format")
     
