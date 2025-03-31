@@ -1480,7 +1480,18 @@ class LidarCameraVisualizer:
             self.detected_dart.set_data([], [])
         
         # Update lean text
-        lean_text = f"Side Lean: {side_lean_angle:.1f if side_lean_angle is not None else 'N/A'}°\nUp/Down: {up_down_lean_angle:.1f if up_down_lean_angle is not None else 'N/A'}°"
+        # Properly handle None values in f-string formatting
+        if side_lean_angle is not None:
+            side_lean_str = f"{side_lean_angle:.1f}°"
+        else:
+            side_lean_str = "N/A"
+    
+        if up_down_lean_angle is not None:
+            up_down_lean_str = f"{up_down_lean_angle:.1f}°"
+        else:
+            up_down_lean_str = "N/A"
+    
+        lean_text = f"Side Lean: {side_lean_str}\nUp/Down: {up_down_lean_str}"
         self.lean_text.set_text(lean_text)
         
         # Return all the artists that need to be redrawn
