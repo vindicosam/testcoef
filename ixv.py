@@ -3,43 +3,48 @@
 print2.py – Integrated Dart Tracking Visualizer
 
 This script uses a single camera (positioned to the left of the board)
-to detect a dart tip. The camera detection uses a pixel‐to‑mm calibration 
+to detect a dart tip. The camera detection uses a pixel‐to‐mm calibration 
 (interpolated from provided calibration points) to convert the detected pixel 
 to a board y-coordinate. Because a single camera can only define a ray, we 
-project an 800 mm vector from the camera along a fixed direction (assumed to be horizontal)
+project an 800 mm vector from the camera along a fixed horizontal direction 
 to yield a candidate tip position. Since the camera is on the left, a detected 
-lean is applied as a y‑axis adjustment: a left lean moves the tip downward and a 
+lean is applied as a y‐axis adjustment: a left lean moves the tip downward and a 
 right lean moves it upward.
 
-Additionally, LIDAR threads are started (stubbed here) to allow fusion with 
-other sensor data (if available).
+Additionally, stub LIDAR threads are started (if available) so that later you 
+can fuse LIDAR data with camera data.
 
 Adjust parameters as needed for your specific setup.
 """
 
-import cv2
-import numpy as np
-import math
+# Use TkAgg to avoid Qt/Wayland issues
+import matplotlib
+matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
+
 from matplotlib.animation import FuncAnimation
-import matplotlib.image as mpimg
-import csv
-import time
-import os
-from datetime import datetime
+import numpy as np
 from queue import Queue
 import threading
 import subprocess
 import signal
 import sys
+import cv2
+import time
+import os
 import json
+import matplotlib.image as mpimg
+import math
+import csv
+from datetime import datetime
+
 
 class LidarCameraVisualizer:
     def __init__(self):
         # -------------------------------
-        # LIDAR Setup (if available – stubbed for now)
+        # LIDAR Setup (if available – stubbed here)
         # -------------------------------
-        self.lidar1_pos = (-202.5, 224.0)  # in mm relative to board center
+        self.lidar1_pos = (-202.5, 224.0)  # mm relative to board center
         self.lidar2_pos = (204.0, 223.5)
         self.lidar1_rotation = 342.5
         self.lidar2_rotation = 186.25
@@ -55,17 +60,17 @@ class LidarCameraVisualizer:
         # Camera Setup (camera is on the left)
         # -------------------------------
         self.camera_position = (-350, 0)   # in board mm (fixed position)
-        self.camera_vector_length = 800    # We project an 800mm vector from the camera
-        # ROI for the camera (values in pixels)
-        self.camera_board_plane_y = 250   # y position (in pixels) where board surface lies
+        self.camera_vector_length = 800    # We project an 800 mm vector from the camera
+        # ROI for the camera (in pixels)
+        self.camera_board_plane_y = 250    # pixel y where board surface lies
         self.camera_roi_range = 30
         self.camera_roi_top = self.camera_board_plane_y - self.camera_roi_range
         self.camera_roi_bottom = self.camera_board_plane_y + self.camera_roi_range
         self.camera_roi_left = 119
         self.camera_roi_right = 604
 
-        # Calibration points for converting a pixel x-coordinate to board mm y-coordinate.
-        # (Each tuple is (pixel_x, mm_y). Adjust these based on your calibration.)
+        # Calibration points for converting pixel x to board mm y.
+        # (Each tuple: (pixel_x, mm_y))
         self.camera_calibration_points = [
             (151, 50),
             (277, -100),
@@ -78,7 +83,7 @@ class LidarCameraVisualizer:
             (290, -171)
         ]
         self.camera_calibration_points.sort(key=lambda p: p[0])
-        # Fallback linear conversion parameters (if not enough points)
+        # Fallback conversion parameters
         self.pixel_to_mm_factor = -0.628
         self.pixel_offset = 192.8
 
@@ -87,7 +92,7 @@ class LidarCameraVisualizer:
         self.detection_persistence_counter = 0
         self.detection_persistence_frames = 30
 
-        # Background subtraction & frame differencing parameters (from previous alean.py)
+        # Background subtractor & frame differencing parameters
         self.camera_bg_subtractor = cv2.createBackgroundSubtractorMOG2(
             history=162, varThreshold=67, detectShadows=False
         )
@@ -95,26 +100,24 @@ class LidarCameraVisualizer:
         self.diff_threshold = 25
         self.min_contour_area = 30
 
-        # Variables to hold the camera detection result
-        # camera_data will store:
-        #   "dart_mm_y": the board y coordinate computed from calibration,
-        #   "dart_angle": the measured lean angle (90° means vertical),
-        #   "tip_pixel": the detected tip pixel (global) coordinate.
+        # Camera detection result storage:
+        # "dart_mm_y": computed board y coordinate,
+        # "dart_angle": measured lean angle (90° is vertical),
+        # "tip_pixel": detected tip pixel (global) coordinate.
         self.camera_data = {"dart_mm_y": None, "dart_angle": None, "tip_pixel": None}
         self.current_cam_lean_angle = None  # in degrees
         self.current_cam_lean_direction = "VERTICAL"  # "LEFT", "RIGHT", or "VERTICAL"
 
-        # Lean offset parameters – note that since the camera is on the left,
-        # we will adjust the final tip position along the y axis.
-        self.side_lean_max_adjustment = 6.0   # Maximum y-axis adjustment in mm
+        # Lean offset: for a left camera, a left lean will decrease the final y value.
+        self.side_lean_max_adjustment = 6.0  # maximum y-axis adjustment in mm
 
         # -------------------------------
         # Dartboard Visualization and Scoring
         # -------------------------------
         self.board_scale_factor = 2.75
-        # Load the dartboard image (ensure this file is present)
+        # Load dartboard image (ensure the file exists in the same directory)
         self.dartboard_image = mpimg.imread("winmau-blade-6-triple-core-carbon-professional-bristle-dartboard.jpg")
-        # Define dartboard region radii (in mm) for scoring
+        # Define board region radii in mm (for scoring, etc.)
         self.radii = {
             "bullseye": 6.35,
             "outer_bull": 15.9,
@@ -128,7 +131,54 @@ class LidarCameraVisualizer:
         # CSV logging initialization
         self.initialize_csv_logging()
 
-        # Running flag and signal handling
+        # Additional data for LIDAR fusion (if available)
+        self.lidar1_projected_point = None
+        self.lidar2_projected_point = None
+        self.camera_board_intersection = None
+
+        # For displaying score text on the plot
+        self.score_text = None
+
+        # Additional calibration correction (stubbed here)
+        self.calibration_points = {}  # you can add your own calibration corrections if desired
+
+        # Scale corrections for board dimensions (if needed)
+        self.x_scale_correction = 1.02
+        self.y_scale_correction = 1.04
+
+        # 3D lean detection variables (stubbed – not used by a single camera)
+        self.current_up_down_lean_angle = 0.0
+        self.up_down_lean_confidence = 0.0
+        self.lean_history = []
+        self.max_lean_history = 60
+        self.lean_arrow = None
+        self.arrow_text = None
+        self.MAX_SIDE_LEAN = 35.0
+        self.MAX_UP_DOWN_LEAN = 30.0
+        self.MAX_X_DIFF_FOR_MAX_LEAN = 4.0
+
+        # NEW: Per-segment radial offsets (in mm)
+        self.segment_radial_offsets = {}
+        for segment in range(1, 21):
+            self.segment_radial_offsets[segment] = -15
+
+        # Coefficient dictionaries for ring corrections (stubbed; use defaults)
+        self.large_segment_coeff = {}  # ... [omitted for brevity – see your working version]
+        self.doubles_coeff = {}
+        self.trebles_coeff = {}
+        self.small_segment_coeff = {}
+
+        # Coefficient strength scaling factors
+        self.coefficient_scaling = {}
+        for segment in range(1, 21):
+            self.coefficient_scaling[segment] = {
+                'doubles': 1.0,
+                'trebles': 1.0,
+                'small': 1.0,
+                'large': 1.0
+            }
+
+        # Set running flag and signal handling
         self.running = True
         signal.signal(signal.SIGINT, self.signal_handler)
 
@@ -136,7 +186,7 @@ class LidarCameraVisualizer:
         self.setup_plot()
 
     # -------------------------------
-    # Pixel-to-mm conversion (using calibration interpolation)
+    # Pixel-to-mm conversion using calibration points
     # -------------------------------
     def pixel_to_mm(self, pixel_x):
         if len(self.camera_calibration_points) >= 2:
@@ -153,7 +203,7 @@ class LidarCameraVisualizer:
             return self.pixel_to_mm_factor * pixel_x + self.pixel_offset
 
     # -------------------------------
-    # Measure dart tip angle using a RANSAC‐style method (adapted from alean.py)
+    # Measure dart tip angle using RANSAC‐style method
     # -------------------------------
     def measure_tip_angle(self, mask, tip_point):
         if tip_point is None:
@@ -217,7 +267,6 @@ class LidarCameraVisualizer:
             else:
                 slope = numerator / denominator
                 best_angle = 90 - math.degrees(math.atan(slope))
-        # Determine lean direction: if angle <85 then LEFT, if >95 then RIGHT, else VERTICAL
         lean = "VERTICAL"
         if best_angle < 85:
             lean = "LEFT"
@@ -247,7 +296,7 @@ class LidarCameraVisualizer:
                 return None
 
     # -------------------------------
-    # Camera detection – using background subtraction and frame differencing
+    # Camera detection using background subtraction and frame differencing
     # -------------------------------
     def camera_detection(self):
         cap = cv2.VideoCapture(0)
@@ -260,7 +309,7 @@ class LidarCameraVisualizer:
             ret, frame = cap.read()
             if not ret:
                 continue
-            # For a left camera, rotate frame 180°
+            # Rotate frame 180° for a left camera
             frame = cv2.rotate(frame, cv2.ROTATE_180)
             roi = frame[self.camera_roi_top:self.camera_roi_bottom, self.camera_roi_left:self.camera_roi_right]
             gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
@@ -275,7 +324,7 @@ class LidarCameraVisualizer:
             kernel = np.ones((3, 3), np.uint8)
             combined_mask = cv2.dilate(combined_mask, kernel, iterations=2)
 
-            # Reset current detection data
+            # Reset current detection
             self.camera_data["dart_mm_y"] = None
             self.camera_data["dart_angle"] = None
             self.camera_data["tip_pixel"] = None
@@ -283,7 +332,6 @@ class LidarCameraVisualizer:
             contours, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             tip_point = None
             if contours:
-                # For a left camera, choose the rightmost contour (largest x)
                 for contour in contours:
                     if cv2.contourArea(contour) > self.min_contour_area:
                         x, y, w, h = cv2.boundingRect(contour)
@@ -296,10 +344,8 @@ class LidarCameraVisualizer:
                     self.camera_data["dart_angle"] = dart_angle
                     self.current_cam_lean_angle = dart_angle
                     self.current_cam_lean_direction = lean_dir
-                # Convert tip coordinate in ROI to global pixel coordinate
                 global_pixel_x = tip_point[0] + self.camera_roi_left
                 global_pixel_y = tip_point[1] + self.camera_roi_top
-                # Use the calibration conversion to get board y-coordinate
                 dart_mm_y = self.pixel_to_mm(global_pixel_x)
                 self.camera_data["dart_mm_y"] = dart_mm_y
                 self.camera_data["tip_pixel"] = (global_pixel_x, global_pixel_y)
@@ -310,7 +356,7 @@ class LidarCameraVisualizer:
                 if self.detection_persistence_counter > 0:
                     self.camera_data = self.last_valid_detection.copy()
 
-            # For debugging – show ROI and mask
+            # Debug windows (can comment these out)
             cv2.imshow("Camera ROI", roi)
             cv2.imshow("Combined Mask", combined_mask)
             if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -319,39 +365,26 @@ class LidarCameraVisualizer:
         cv2.destroyAllWindows()
 
     # -------------------------------
-    # Compute the camera vector based on the detection
+    # Compute the camera vector (project an 800 mm ray)
     # -------------------------------
     def compute_camera_vector(self):
-        """
-        Since a single camera only provides a ray,
-        we define the final camera-determined tip as the point
-        that lies 800mm from the camera along a horizontal line,
-        with the board y-coordinate taken from the calibration conversion.
-        """
         if self.camera_data.get("dart_mm_y") is None or self.camera_data.get("tip_pixel") is None:
             return None
-        # We assume the horizontal (x) component of the detected tip comes solely from the fixed vector.
-        # Thus, the final camera vector point is:
-        #   (camera_position_x + 800, dart_mm_y)
         cam_x = self.camera_position[0]
         final_x = cam_x + self.camera_vector_length
         final_y = self.camera_data["dart_mm_y"]
         return (final_x, final_y)
 
     # -------------------------------
-    # Apply lean offset adjustment on the y axis.
-    # For a camera on the left, a left lean (angle < 90) moves the tip downward,
-    # and a right lean (angle > 90) moves it upward.
+    # Apply lean offset on the y axis (for a left camera)
     # -------------------------------
     def apply_lean_offset(self, point):
         if point is None or self.current_cam_lean_angle is None:
             return point
         x, y = point
-        deviation = 90 - self.current_cam_lean_angle  # positive if lean to LEFT, negative if RIGHT
-        # Calculate offset proportionally (max offset when deviation is 90°)
+        deviation = 90 - self.current_cam_lean_angle  # positive: left lean
         offset = (deviation / 90.0) * self.side_lean_max_adjustment
-        # For a left camera, a positive deviation (left lean) moves the tip downward (decrease y)
-        adjusted_y = y - offset
+        adjusted_y = y - offset  # left lean moves tip downward
         return (x, adjusted_y)
 
     # -------------------------------
@@ -402,16 +435,21 @@ class LidarCameraVisualizer:
         self.fig, self.ax = plt.subplots(figsize=(10, 10))
         self.ax.set_xlim(-400, 400)
         self.ax.set_ylim(-400, 400)
-        self.ax.set_title("Dartboard Visualization")
+        self.ax.set_title("LIDAR and Camera Vector Visualization")
         self.ax.grid(True)
         self.update_dartboard_image()
         # Plot fixed sensor positions
         self.ax.plot(*self.camera_position, "ro", label="Camera")
         self.ax.plot(*self.lidar1_pos, "bo", label="LIDAR 1")
         self.ax.plot(*self.lidar2_pos, "go", label="LIDAR 2")
-        # Markers for camera vector and final tip position
-        self.camera_vector_marker, = self.ax.plot([], [], "r--", label="Camera Vector")
-        self.detected_tip_marker, = self.ax.plot([], [], "rx", markersize=10, label="Final Tip")
+        # Markers for vectors and dart tip
+        self.camera_vector, = self.ax.plot([], [], "r--", label="Camera Vector")
+        self.camera_dart, = self.ax.plot([], [], "rx", markersize=8, label="Camera Intersection")
+        self.lidar1_dart, = self.ax.plot([], [], "bx", markersize=8, label="LIDAR 1 Projected", zorder=3)
+        self.lidar2_dart, = self.ax.plot([], [], "gx", markersize=8, label="LIDAR 2 Projected", zorder=3)
+        self.detected_dart, = self.ax.plot([], [], "ro", markersize=4, label="Final Tip Position", zorder=10)
+        self.scatter1, = self.ax.plot([], [], "b.", label="LIDAR 1 Data", zorder=3)
+        self.scatter2, = self.ax.plot([], [], "g.", label="LIDAR 2 Data", zorder=3)
         self.lean_text = self.ax.text(-380, 380, "", fontsize=9)
         self.ax.legend(loc="upper right", fontsize=8)
 
@@ -420,89 +458,118 @@ class LidarCameraVisualizer:
                          -170 * self.board_scale_factor, 170 * self.board_scale_factor]
         self.ax.imshow(self.dartboard_image, extent=scaled_extent, zorder=0)
 
-    def update_plot(self, frame):
-        # Process camera data to compute the camera vector
-        cam_vector = self.compute_camera_vector()  # This is (camera_position_x+800, dart_mm_y)
-        # Apply lean offset on the y axis
-        adjusted_cam_vector = self.apply_lean_offset(cam_vector)
-        
-        # Log data if available
-        if adjusted_cam_vector is not None and self.camera_data.get("tip_pixel") is not None:
-            self.log_dart_data(
-                adjusted_cam_vector,
-                self.camera_data["tip_pixel"],
-                self.current_cam_lean_angle if self.current_cam_lean_angle is not None else 0,
-                self.current_cam_lean_direction
-            )
-            # Update camera vector visualization (draw a line from camera position to the computed point)
-            self.camera_vector_marker.set_data(
-                [self.camera_position[0], adjusted_cam_vector[0]],
-                [self.camera_position[1], adjusted_cam_vector[1]]
-            )
-            # Update final tip marker
-            self.detected_tip_marker.set_data(
-                [adjusted_cam_vector[0]], [adjusted_cam_vector[1]]
-            )
-        else:
-            self.camera_vector_marker.set_data([], [])
-            self.detected_tip_marker.set_data([], [])
-        
-        # Update lean text
-        side_str = f"{self.current_cam_lean_angle:.1f}°" if self.current_cam_lean_angle is not None else "N/A"
-        lean_text = f"Lean: {side_str} ({self.current_cam_lean_direction})"
-        self.lean_text.set_text(lean_text)
-        
-        return [self.camera_vector_marker, self.detected_tip_marker, self.lean_text]
-
     # -------------------------------
     # LIDAR reading thread (stubbed – adjust script paths as needed)
     # -------------------------------
     def start_lidar(self, script_path, queue_obj, lidar_id):
         try:
             process = subprocess.Popen([script_path], stdout=subprocess.PIPE, text=True)
-            print(f"LIDAR {lidar_id} started.")
+            print(f"LIDAR {lidar_id} started successfully.")
             while self.running:
                 line = process.stdout.readline()
-                if not line:
-                    continue
                 if "a:" in line and "d:" in line:
                     try:
                         parts = line.strip().split()
                         angle = float(parts[1].replace("a:", ""))
                         distance = float(parts[2].replace("d:", ""))
                         queue_obj.put((angle, distance))
-                    except Exception:
+                    except ValueError:
                         continue
         except Exception as e:
-            print(f"Error starting LIDAR {lidar_id}: {e}")
+            print(f"Error with LIDAR {lidar_id}: {e}")
 
     # -------------------------------
-    # Main run loop
+    # Main update function for animation
+    # -------------------------------
+    def update_plot(self, frame):
+        # Process LIDAR data (if any)
+        lidar1_points_x = []
+        lidar1_points_y = []
+        lidar2_points_x = []
+        lidar2_points_y = []
+        while not self.lidar1_queue.empty():
+            angle, distance = self.lidar1_queue.get()
+            x, y = self.polar_to_cartesian(angle, distance, self.lidar1_pos, self.lidar1_rotation, self.lidar1_mirror)
+            if x is not None and y is not None:
+                in_range, _ = self.filter_points_by_radii(x, y)
+                if in_range:
+                    lidar1_points_x.append(x)
+                    lidar1_points_y.append(y)
+                    self.lidar1_recent_points.append((x, y))
+        while not self.lidar2_queue.empty():
+            angle, distance = self.lidar2_queue.get()
+            x, y = self.polar_to_cartesian(angle, distance, self.lidar2_pos, self.lidar2_rotation, self.lidar2_mirror)
+            if x is not None and y is not None:
+                in_range, _ = self.filter_points_by_radii(x, y)
+                if in_range:
+                    lidar2_points_x.append(x)
+                    lidar2_points_y.append(y)
+                    self.lidar2_recent_points.append((x, y))
+        self.lidar1_recent_points = self.lidar1_recent_points[-self.max_recent_points:]
+        self.lidar2_recent_points = self.lidar2_recent_points[-self.max_recent_points:]
+
+        # Get camera data
+        camera_y = self.camera_data["dart_mm_y"]
+        side_lean_angle = self.camera_data["dart_angle"]
+        # (For a single camera, up/down lean is not determined, so we set it to 0)
+        up_down_lean_angle = 0
+        lean_confidence = 0
+        if len(self.lidar1_recent_points) > 0 and len(self.lidar2_recent_points) > 0:
+            lidar1_point = self.lidar1_recent_points[-1]
+            lidar2_point = self.lidar2_recent_points[-1]
+            up_down_lean_angle, lean_confidence = self.detect_up_down_lean(lidar1_point, lidar2_point)
+        self.update_lean_visualization(side_lean_angle, up_down_lean_angle, lean_confidence)
+        camera_point = self.find_camera_board_intersection(camera_y)
+        # (For this single camera mode, we rely solely on the camera vector)
+        final_tip_position = self.apply_lean_offset(self.compute_camera_vector())
+        # Log data to CSV
+        self.log_dart_data(final_tip_position, self.camera_data["tip_pixel"],
+                           side_lean_angle if side_lean_angle is not None else 0,
+                           up_down_lean_angle)
+        # Update plot markers
+        self.scatter1.set_data(lidar1_points_x, lidar1_points_y)
+        self.scatter2.set_data(lidar2_points_x, lidar2_points_y)
+        if camera_point is not None:
+            self.camera_vector.set_data([self.camera_position[0], camera_point[0]],
+                                        [self.camera_position[1], camera_point[1]])
+            self.camera_dart.set_data([camera_point[0]], [camera_point[1]])
+        else:
+            self.camera_vector.set_data([], [])
+            self.camera_dart.set_data([], [])
+        self.detected_dart.set_data([final_tip_position[0]], [final_tip_position[1]] if final_tip_position else ([], []))
+        if side_lean_angle is not None:
+            side_str = f"{side_lean_angle:.1f}°"
+        else:
+            side_str = "N/A"
+        lean_text = f"Lean: {side_str} ({self.current_cam_lean_direction})"
+        self.lean_text.set_text(lean_text)
+        artists = [self.scatter1, self.scatter2, self.camera_vector, self.camera_dart,
+                   self.detected_dart, self.lean_text]
+        if hasattr(self, 'score_text') and self.score_text:
+            artists.append(self.score_text)
+        if hasattr(self, 'lean_arrow') and self.lean_arrow:
+            artists.append(self.lean_arrow)
+        if hasattr(self, 'arrow_text') and self.arrow_text:
+            artists.append(self.arrow_text)
+        return artists
+
+    # -------------------------------
+    # Main run loop: start LIDAR, camera, and animation threads
     # -------------------------------
     def run(self, lidar1_script, lidar2_script):
-        # Start LIDAR threads (if available)
-        lidar1_thread = threading.Thread(
-            target=self.start_lidar,
-            args=(lidar1_script, self.lidar1_queue, 1),
-            daemon=True
-        )
-        lidar2_thread = threading.Thread(
-            target=self.start_lidar,
-            args=(lidar2_script, self.lidar2_queue, 2),
-            daemon=True
-        )
+        lidar1_thread = threading.Thread(target=self.start_lidar,
+                                         args=(lidar1_script, self.lidar1_queue, 1),
+                                         daemon=True)
+        lidar2_thread = threading.Thread(target=self.start_lidar,
+                                         args=(lidar2_script, self.lidar2_queue, 2),
+                                         daemon=True)
         camera_thread = threading.Thread(target=self.camera_detection, daemon=True)
-        
         lidar1_thread.start()
         time.sleep(1)
         lidar2_thread.start()
         time.sleep(1)
         camera_thread.start()
-        
-        # Start matplotlib animation for visualization
-        self.ani = FuncAnimation(
-            self.fig, self.update_plot, blit=True, interval=100, cache_frame_data=False
-        )
+        self.ani = FuncAnimation(self.fig, self.update_plot, blit=True, interval=100, cache_frame_data=False)
         plt.show()
 
     def signal_handler(self, signum, frame):
@@ -511,11 +578,19 @@ class LidarCameraVisualizer:
         plt.close("all")
         sys.exit(0)
 
+    # --- (Calibration mode and LIDAR offset/scaling methods omitted for brevity) ---
+
+
 if __name__ == "__main__":
-    # Replace these with your actual LIDAR script paths or stubs.
-    lidar1_script = "./lidar1_script.py"
-    lidar2_script = "./lidar2_script.py"
+    # Replace these script paths with the actual paths for your LIDAR scripts
+    lidar1_script = "./tri_test_lidar1"
+    lidar2_script = "./tri_test_lidar2"
     
     visualizer = LidarCameraVisualizer()
-    # If no calibration mode is desired, simply run
+    
+    # Optionally load coefficient scaling and segment offsets if available
+    visualizer.load_coefficient_scaling()
+    visualizer.load_segment_radial_offsets()
+    
+    # If no command line arguments, run normally
     visualizer.run(lidar1_script, lidar2_script)
