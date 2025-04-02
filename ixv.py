@@ -885,6 +885,23 @@ class LidarCameraVisualizer:
         if camera_y is None:
             return None
         return (0, camera_y)
+        
+    def get_camera_vector_end(self, camera_y):
+    # This calculates an extended point along the ray from camera_position through (0, camera_y)
+        if camera_y is None:
+            return None
+        # Calculate the direction from the camera position to the original intersection (0, camera_y)
+        dx = 0 - self.camera_position[0]
+        dy = camera_y - self.camera_position[1]
+        norm = math.sqrt(dx * dx + dy * dy)
+        if norm == 0:
+            return self.camera_position
+        ux = dx / norm
+        uy = dy / norm
+        # Extend the ray by the specified vector length
+        extended_x = self.camera_position[0] + ux * self.camera_vector_length
+        extended_y = self.camera_position[1] + uy * self.camera_vector_length
+        return (extended_x, extended_y)
     
     def calculate_final_tip_position(self, camera_point, lidar1_point, lidar2_point):
         """
@@ -988,100 +1005,132 @@ class LidarCameraVisualizer:
                 fontsize=8, color='purple'
             )
 
+    
     def update_plot(self, frame):
         """Update plot data with enhanced 3D lean correction and CSV logging."""
+        # Process LIDAR data
         lidar1_points_x = []
         lidar1_points_y = []
         lidar2_points_x = []
         lidar2_points_y = []
+    
+        # Process LIDAR 1 queue
         while not self.lidar1_queue.empty():
             angle, distance = self.lidar1_queue.get()
-            x, y = self.polar_to_cartesian(angle, distance, self.lidar1_pos, self.lidar1_rotation, self.lidar1_mirror)
+            x, y = self.polar_to_cartesian(angle, distance, self.lidar1_pos, 
+                                           self.lidar1_rotation, self.lidar1_mirror)
             if x is not None and y is not None:
+                # Filter points by radii
                 in_range, _ = self.filter_points_by_radii(x, y)
                 if in_range:
                     lidar1_points_x.append(x)
                     lidar1_points_y.append(y)
                     self.lidar1_recent_points.append((x, y))
+    
+        # Process LIDAR 2 queue
         while not self.lidar2_queue.empty():
             angle, distance = self.lidar2_queue.get()
-            x, y = self.polar_to_cartesian(angle, distance, self.lidar2_pos, self.lidar2_rotation, self.lidar2_mirror)
+            x, y = self.polar_to_cartesian(angle, distance, self.lidar2_pos, 
+                                           self.lidar2_rotation, self.lidar2_mirror)
             if x is not None and y is not None:
+                # Filter points by radii
                 in_range, _ = self.filter_points_by_radii(x, y)
                 if in_range:
                     lidar2_points_x.append(x)
                     lidar2_points_y.append(y)
                     self.lidar2_recent_points.append((x, y))
+    
+        # Keep only the most recent points
         self.lidar1_recent_points = self.lidar1_recent_points[-self.max_recent_points:]
         self.lidar2_recent_points = self.lidar2_recent_points[-self.max_recent_points:]
+    
+        # Get the camera data
         camera_y = self.camera_data["dart_mm_y"]
         side_lean_angle = self.camera_data["dart_angle"]
+    
+        # Calculate lean angle
         up_down_lean_angle = 0
         lean_confidence = 0
+    
         if len(self.lidar1_recent_points) > 0 and len(self.lidar2_recent_points) > 0:
             lidar1_point = self.lidar1_recent_points[-1]
             lidar2_point = self.lidar2_recent_points[-1]
             up_down_lean_angle, lean_confidence = self.detect_up_down_lean(lidar1_point, lidar2_point)
+    
+        # Update lean visualization
         self.update_lean_visualization(side_lean_angle, up_down_lean_angle, lean_confidence)
-        camera_point = self.find_camera_board_intersection(camera_y)
+    
+        # Compute camera-related points:
+        # Find the intersection point (for tip position calculation)
+        camera_intersection = self.get_camera_intersection(camera_y)
+        # Compute the extended vector end for visualization
+        extended_vector_end = self.get_camera_vector_end(camera_y)
+    
+        if camera_intersection is not None:
+            self.camera_vector.set_data(
+                [self.camera_position[0], extended_vector_end[0]],
+                [self.camera_position[1], extended_vector_end[1]]
+            )
+            # Use the intersection point for the camera detection marker
+            self.camera_dart.set_data([camera_intersection[0]], [camera_intersection[1]])
+        else:
+            self.camera_vector.set_data([], [])
+            self.camera_dart.set_data([], [])
+    
+        # Project LIDAR points with 3D lean correction
         lidar1_projected = None
         lidar2_projected = None
+    
         if len(self.lidar1_recent_points) > 0:
             lidar1_point = self.lidar1_recent_points[-1]
             lidar1_projected = self.project_lidar_point_with_3d_lean(
-                lidar1_point, self.lidar1_height, side_lean_angle, up_down_lean_angle, camera_y
+                lidar1_point, self.lidar1_height, side_lean_angle, 
+                up_down_lean_angle, camera_y
             )
+    
         if len(self.lidar2_recent_points) > 0:
             lidar2_point = self.lidar2_recent_points[-1]
             lidar2_projected = self.project_lidar_point_with_3d_lean(
-                lidar2_point, self.lidar2_height, side_lean_angle, up_down_lean_angle, camera_y
+                lidar2_point, self.lidar2_height, side_lean_angle, 
+                up_down_lean_angle, camera_y
             )
+    
+        # Calculate final tip position
         final_tip_position = self.calculate_final_tip_position(
-            camera_point, lidar1_projected, lidar2_projected
+            camera_intersection, lidar1_projected, lidar2_projected
         )
+    
+        # Apply segment-specific coefficients and calibration corrections
         if final_tip_position is not None:
             x, y = final_tip_position
             x, y = self.apply_segment_coefficients(x, y)
-            # Note: apply_calibration_correction is not implemented in this version
+            x, y = self.apply_calibration_correction(x, y)
             final_tip_position = (x, y)
+    
+        # Log data to CSV
         self.log_dart_data(
             final_tip_position, 
             self.camera_data["tip_pixel"], 
             side_lean_angle, 
             up_down_lean_angle
         )
+    
+        # Update plot with new data
         self.scatter1.set_data(lidar1_points_x, lidar1_points_y)
         self.scatter2.set_data(lidar2_points_x, lidar2_points_y)
-        if camera_point is not None:
-            dir_x = camera_point[0] - self.camera_position[0]
-            dir_y = camera_point[1] - self.camera_position[1]
-            length = math.sqrt(dir_x**2 + dir_y**2)
-            if length > 0:
-                norm_x = dir_x / length
-                norm_y = dir_y / length
-                extended_x = self.camera_position[0] + norm_x * self.camera_vector_length
-                extended_y = self.camera_position[1] + norm_y * self.camera_vector_length
-                self.camera_vector.set_data(
-                    [self.camera_position[0], extended_x],
-                    [self.camera_position[1], extended_y]
-                )
-            else:
-                self.camera_vector.set_data(
-                    [self.camera_position[0], camera_point[0]],
-                    [self.camera_position[1], camera_point[1]]
-                )
-            self.camera_dart.set_data([camera_point[0]], [camera_point[1]])
-        else:
-            self.camera_vector.set_data([], [])
-            self.camera_dart.set_data([], [])
+    
+        # Update LIDAR projections
         if lidar1_projected is not None:
             self.lidar1_dart.set_data([lidar1_projected[0]], [lidar1_projected[1]])
         else:
             self.lidar1_dart.set_data([], [])
+    
         if lidar2_projected is not None:
             self.lidar2_dart.set_data([lidar2_projected[0]], [lidar2_projected[1]])
         else:
             self.lidar2_dart.set_data([], [])
+    
+        # Update final tip position marker and score text
         if final_tip_position is not None:
             self.detected_dart.set_data([final_tip_position[0]], [final_tip_position[1]])
             score = self.xy_to_dartboard_score(final_tip_position[0], final_tip_position[1])
@@ -1093,28 +1142,38 @@ class LidarCameraVisualizer:
                     self.score_text = self.ax.text(-380, 360, description, fontsize=12, color='red')
         else:
             self.detected_dart.set_data([], [])
+    
+        # Update lean text
         if side_lean_angle is not None:
             side_lean_str = f"{side_lean_angle:.1f}°"
         else:
             side_lean_str = "N/A"
+    
         if up_down_lean_angle is not None:
             up_down_lean_str = f"{up_down_lean_angle:.1f}°"
         else:
             up_down_lean_str = "N/A"
+    
         lean_text = f"Side Lean: {side_lean_str}\nUp/Down: {up_down_lean_str}"
         self.lean_text.set_text(lean_text)
+    
+        # Return all the artists that need to be redrawn
         artists = [
             self.scatter1, self.scatter2, 
             self.camera_vector, self.camera_dart,
             self.lidar1_dart, self.lidar2_dart, 
             self.detected_dart, self.lean_text
         ]
+    
         if hasattr(self, 'score_text') and self.score_text:
             artists.append(self.score_text)
+    
         if hasattr(self, 'lean_arrow') and self.lean_arrow:
             artists.append(self.lean_arrow)
+    
         if hasattr(self, 'arrow_text') and self.arrow_text:
             artists.append(self.arrow_text)
+    
         return artists
 
     def run(self, lidar1_script, lidar2_script):
