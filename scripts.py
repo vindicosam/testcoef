@@ -1203,7 +1203,11 @@ def project_lidar_point_with_3d_lean(self, lidar_point, lidar_height, side_lean_
         # Simple case - the Y coordinate is directly from camera, X is 0 (board surface)
         # In reality, we might need a more complex projection based on camera angle
         return (0, camera_y)
-
+    def get_camera_intersection(self, camera_y):
+	    if camera_y is None:
+	        return None
+	    return (0, camera_y)
+ 
     def calculate_final_tip_position(self, camera_point, lidar1_point, lidar2_point):
         """
         Calculate the final tip position using all available data with enhanced 3D lean correction.
