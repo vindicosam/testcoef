@@ -886,6 +886,11 @@ class LidarCameraVisualizer:
             return None
         return (0, camera_y)
         
+    def get_camera_intersection(self, camera_y):
+        if camera_y is None:
+            return None
+        return (0, camera_y)
+    
     def get_camera_vector_end(self, camera_y):
     # This calculates an extended point along the ray from camera_position through (0, camera_y)
         if camera_y is None:
