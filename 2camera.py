@@ -2,27 +2,28 @@ import cv2
 import numpy as np
 import math
 from bisect import bisect_left
+import time
 
 class DualCameraEpipolarTrainer:
     def __init__(self, cam_index1=0, cam_index2=2):
         # Static camera positions in board mm
-        self.camera1_position = (0, 350)    # Front camera fixed position
-        self.camera2_position = (-650, 0)   # Side camera fixed position
+        self.camera1_position = (0, 600)    # Front camera fixed position
+        self.camera2_position = (-600, 0)   # Side camera fixed position
 
         # Camera settings
         self.frame_width = 640
         self.frame_height = 480
 
         # Camera 1 board plane line (y value in pixels where board surface is)
-        self.cam1_board_plane_y = 198
+        self.cam1_board_plane_y = 192
         # Allowed range around the board plane for detection
-        self.cam1_roi_range = 30
+        self.cam1_roi_range = 50
         # Camera 1 ROI calculated from board plane
         self.cam1_roi_top = self.cam1_board_plane_y - self.cam1_roi_range
         self.cam1_roi_bottom = self.cam1_board_plane_y + self.cam1_roi_range
         
         # Camera 2 board plane line (y value in pixels where board surface is)
-        self.cam2_board_plane_y = 199
+        self.cam2_board_plane_y = 241
         # Allowed range around the board plane for detection
         self.cam2_roi_range = 30
         # Camera 2 ROI calculated from board plane
@@ -32,11 +33,11 @@ class DualCameraEpipolarTrainer:
         # Initialize calibration points dictionary
         self.calibration_points = {
             # Format: (board_x, board_y): (cam1_pixel_x, cam2_pixel_x)
-            (0, 0): (290, 307),
-            (-171, 0): (506, 307),
-            (171, 0): (68, 307),
-            (0, 171): (290, 34),
-            (0, -171): (290, 578),
+            (0, 0): (310, 314),
+            (-171, 0): (583, 390),
+            (171, 0): (32, 294),
+            (0, 171): (319, 27),
+            (0, -171): (305, 571),
             (90, 50): (151, 249),
             (-20, 103): (327, 131),
             (20, -100): (277, 459),
@@ -47,11 +48,11 @@ class DualCameraEpipolarTrainer:
         # Format: board_x, board_y, cam1_pixel_x, cam2_pixel_x
         additional_calibration_points = [
             # Segment 18 - double and treble
-            (114, 121, 41, 170),   # Double 18
-            (48, 86, 209, 189),    # Treble 18
+            (114, 121, 17, 153),   # Double 18
+            (48, 86, 214, 182),    # Treble 18
             # Segment 15 - double and treble
-            (119, -117, 179, 441), # Double 15
-            (86, -48, 194, 364),   # Treble 15
+            (119, -117, 167, 429), # Double 15
+            (86, -48, 189, 359),   # Treble 15
             # Segment 7 - double and treble
             (-118, -121, 399, 595), # Double 7
             (-50, -88, 337, 462),   # Treble 7
@@ -64,6 +65,52 @@ class DualCameraEpipolarTrainer:
         for point in additional_calibration_points:
             board_x, board_y, cam1_pixel_x, cam2_pixel_x = point
             self.calibration_points[(board_x, board_y)] = (cam1_pixel_x, cam2_pixel_x)
+
+        # Additional segment calibration points for all doubles and triples
+        # Format: board_x, board_y, cam1_pixel_x, cam2_pixel_x
+        segment_calibration_points = [
+            # Double segments (outer ring, moved 1mm inward)
+            (0, 169, None, None),      # Double 20
+            (88, 146, None, None),     # Double 1
+            (146, 88, None, None),     # Double 18
+            (169, 0, None, None),      # Double 4
+            (146, -88, None, None),    # Double 13
+            (88, -146, None, None),    # Double 6
+            (0, -169, None, None),     # Double 10
+            (-88, -146, None, None),   # Double 15
+            (-146, -88, None, None),   # Double 2
+            (-169, 0, None, None),     # Double 17
+            (-146, 88, None, None),    # Double 3
+            (-88, 146, None, None),    # Double 19
+            
+            # Triple segments (middle ring, moved 1mm inward)
+            (0, 106, None, None),      # Triple 20
+            (55, 91, None, None),      # Triple 1
+            (91, 55, None, None),      # Triple 18
+            (106, 0, None, None),      # Triple 4
+            (91, -55, None, None),     # Triple 13
+            (55, -91, None, None),     # Triple 6
+            (0, -106, None, None),     # Triple 10
+            (-55, -91, None, None),    # Triple 15
+            (-91, -55, None, None),    # Triple 2
+            (-106, 0, None, None),     # Triple 17
+            (-91, 55, None, None),     # Triple 3
+            (-55, 91, None, None),     # Triple 19
+            
+            # Additional key segment locations
+            (0, 0, None, None),        # Bullseye
+            (0, 41, None, None),       # Outer bull (north)
+            (41, 0, None, None),       # Outer bull (east)
+            (0, -41, None, None),      # Outer bull (south)
+            (-41, 0, None, None),      # Outer bull (west)
+        ]
+        
+        # Only add segment calibration points if they have pixel values
+        for point in segment_calibration_points:
+            board_x, board_y, cam1_pixel_x, cam2_pixel_x = point
+            if cam1_pixel_x is not None and cam2_pixel_x is not None:
+                self.calibration_points[(board_x, board_y)] = (cam1_pixel_x, cam2_pixel_x)
+                print(f"Added calibration point: ({board_x}, {board_y}) => Cam1: {cam1_pixel_x}, Cam2: {cam2_pixel_x}")
 
         # Create sorted mapping tables for direct interpolation
         # Camera 1: pixel_x to board_x mapping
@@ -83,17 +130,27 @@ class DualCameraEpipolarTrainer:
         self.cam2_pixel_to_board_mapping.sort(key=lambda x: x[0])
         
         # Print mapping tables for debugging
-        print("Camera 1 pixel-to-board mapping (sorted by pixel_x):")
+        print("\nCamera 1 pixel-to-board mapping (sorted by pixel_x):")
         for pixel_x, board_x in self.cam1_pixel_to_board_mapping:
             print(f"  Pixel: {pixel_x} -> Board X: {board_x}")
         
-        print("Camera 2 pixel-to-board mapping (sorted by pixel_x):")
+        # Check for pixel range coverage
+        cam1_pixel_min = min(x[0] for x in self.cam1_pixel_to_board_mapping)
+        cam1_pixel_max = max(x[0] for x in self.cam1_pixel_to_board_mapping)
+        print(f"\nCamera 1 pixel range: {cam1_pixel_min} to {cam1_pixel_max} (width coverage: {(cam1_pixel_max - cam1_pixel_min) / self.frame_width * 100:.1f}%)")
+        
+        print("\nCamera 2 pixel-to-board mapping (sorted by pixel_x):")
         for pixel_x, board_y in self.cam2_pixel_to_board_mapping:
             print(f"  Pixel: {pixel_x} -> Board Y: {board_y}")
+            
+        # Check for pixel range coverage
+        cam2_pixel_min = min(x[0] for x in self.cam2_pixel_to_board_mapping)
+        cam2_pixel_max = max(x[0] for x in self.cam2_pixel_to_board_mapping)
+        print(f"\nCamera 2 pixel range: {cam2_pixel_min} to {cam2_pixel_max} (width coverage: {(cam2_pixel_max - cam2_pixel_min) / self.frame_width * 100:.1f}%)")
 
         # Background subtractors
-        self.bg_subtractor1 = cv2.createBackgroundSubtractorMOG2(history=150, varThreshold=20, detectShadows=False)
-        self.bg_subtractor2 = cv2.createBackgroundSubtractorMOG2(history=150, varThreshold=20, detectShadows=False)
+        self.bg_subtractor1 = cv2.createBackgroundSubtractorMOG2(history=300, varThreshold=67, detectShadows=False)
+        self.bg_subtractor2 = cv2.createBackgroundSubtractorMOG2(history=300, varThreshold=67, detectShadows=False)
 
         # Camera indices
         self.cam_index1 = cam_index1
@@ -106,6 +163,7 @@ class DualCameraEpipolarTrainer:
         # Load the dartboard image
         self.board_image = cv2.imread("winmau-blade-6-triple-core-carbon-professional-bristle-dartboard.jpg")
         if self.board_image is None:
+            print("Warning: dartboard image not found. Using placeholder.")
             self.board_image = np.zeros((500, 500, 3), dtype=np.uint8)
 
         # Vectors from each camera (in board mm)
@@ -123,8 +181,33 @@ class DualCameraEpipolarTrainer:
             18: (114, 121),     # Double 18 
             15: (119, -117),    # Double 15
             7: (-118, -121),    # Double 7
-            9: (121, 118)       # Double 9
+            9: (121, 118),      # Double 9
+            # Add standard segments
+            1: (88, 146),       # Double 1
+            2: (-146, -88),     # Double 2  
+            3: (-146, 88),      # Double 3
+            6: (88, -146),      # Double 6
+            8: (-88, -146),     # Double 8
+            10: (0, -169),      # Double 10
+            11: (0, 0),         # Bullseye
+            12: (-88, 146),     # Double 12
+            13: (146, -88),     # Double 13
+            14: (-88, 146),     # Double 14
+            19: (-88, 146),     # Double 19
+            20: (0, 169),       # Double 20
         }
+        
+        # Detection history for smoothing
+        self.detection_history = {
+            'cam1': [],
+            'cam2': [],
+            'final': []
+        }
+        self.history_max_size = 3  # Number of frames to keep for smoothing
+        
+        # Calibration mode
+        self.calibration_mode = False
+        self.calibration_point = None
 
     def interpolate_value(self, pixel_value, mapping_table):
         """
@@ -175,6 +258,33 @@ class DualCameraEpipolarTrainer:
         y = num_y / denominator
         return (x, y)
 
+    def apply_smoothing(self, new_value, history_key):
+        """
+        Apply smoothing to the detection using simple moving average.
+        """
+        if new_value is None:
+            return None
+            
+        # Add new value to history
+        self.detection_history[history_key].append(new_value)
+        
+        # Keep history at max size
+        if len(self.detection_history[history_key]) > self.history_max_size:
+            self.detection_history[history_key].pop(0)
+            
+        # If we have enough history, compute average
+        if len(self.detection_history[history_key]) >= 2:
+            if history_key == 'final':
+                # For final position, average x and y separately
+                avg_x = sum(p[0] for p in self.detection_history[history_key]) / len(self.detection_history[history_key])
+                avg_y = sum(p[1] for p in self.detection_history[history_key]) / len(self.detection_history[history_key])
+                return (avg_x, avg_y)
+            else:
+                # For camera vectors, we're just smoothing a single value
+                return sum(self.detection_history[history_key]) / len(self.detection_history[history_key])
+        
+        return new_value
+
     def process_camera1_frame(self, frame):
         frame_rot = cv2.rotate(frame, cv2.ROTATE_180)
         roi = frame_rot[self.cam1_roi_top:self.cam1_roi_bottom, :]
@@ -184,34 +294,44 @@ class DualCameraEpipolarTrainer:
 
         contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         dart_pixel_x = None
+        
+        # Draw a tracking line at the board plane y-value
+        roi_center_y = self.cam1_board_plane_y - self.cam1_roi_top
+        cv2.line(roi, (0, roi_center_y), (roi.shape[1], roi_center_y), (0, 255, 255), 1)
+        
         for contour in contours:
             if cv2.contourArea(contour) > 20:
                 x, y, w, h = cv2.boundingRect(contour)
                 dart_pixel_x = x + w // 2
                 # Highlight the detected point
-                roi_center_y = self.cam1_board_plane_y - self.cam1_roi_top
                 cv2.circle(roi, (dart_pixel_x, roi_center_y), 5, (0, 255, 0), -1)
                 cv2.putText(roi, f"Px: {dart_pixel_x}", (dart_pixel_x + 5, roi_center_y - 5),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+                
+                # In calibration mode, display the pixel values for easy recording
+                if self.calibration_mode and self.calibration_point:
+                    print(f"Cam1 pixel for {self.calibration_point}: {dart_pixel_x}")
+                
                 break
 
         if dart_pixel_x is not None:
             # Use interpolation to get board x-coordinate directly from pixel value
             board_x = self.interpolate_value(dart_pixel_x, self.cam1_pixel_to_board_mapping)
             
+            # Apply smoothing
+            smoothed_board_x = self.apply_smoothing(board_x, 'cam1')
+            
             # Store vector info - we know this passes through (board_x, 0) on the board
-            self.cam1_vector = (board_x, 0)
+            self.cam1_vector = (smoothed_board_x, 0)
             
             # Add debugging info to display
-            cv2.putText(roi, f"Board X: {board_x:.1f}mm", (10, 20), 
+            cv2.putText(roi, f"Board X: {smoothed_board_x:.1f}mm", (10, 20), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+            
+            # Print to terminal for monitoring
+            print(f"Camera 1: Detected at pixel x={dart_pixel_x}, mapped to board X={smoothed_board_x:.1f}mm")
         else:
             self.cam1_vector = None
-
-        # Draw a line at the board plane y-value
-        cv2.line(roi, (0, self.cam1_board_plane_y - self.cam1_roi_top), 
-                     (roi.shape[1], self.cam1_board_plane_y - self.cam1_roi_top), 
-                     (0, 255, 255), 1)
 
         frame_rot[self.cam1_roi_top:self.cam1_roi_bottom, :] = roi
         return frame_rot, fg_mask
@@ -225,53 +345,47 @@ class DualCameraEpipolarTrainer:
 
         contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         dart_pixel_x = None
+        
+        # Draw a tracking line at the board plane y-value
+        roi_center_y = self.cam2_board_plane_y - self.cam2_roi_top
+        cv2.line(roi, (0, roi_center_y), (roi.shape[1], roi_center_y), (0, 255, 255), 1)
+        
         for contour in contours:
             if cv2.contourArea(contour) > 20:
                 x, y, w, h = cv2.boundingRect(contour)
                 dart_pixel_x = x + w // 2
                 # Highlight the detected point
-                roi_center_y = self.cam2_board_plane_y - self.cam2_roi_top
                 cv2.circle(roi, (dart_pixel_x, roi_center_y), 5, (0, 255, 0), -1)
                 cv2.putText(roi, f"Px: {dart_pixel_x}", (dart_pixel_x + 5, roi_center_y - 5),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+                
+                # In calibration mode, display the pixel values for easy recording
+                if self.calibration_mode and self.calibration_point:
+                    print(f"Cam2 pixel for {self.calibration_point}: {dart_pixel_x}")
+                
                 break
 
         if dart_pixel_x is not None:
             # Use interpolation to get board y-coordinate directly from pixel value
             board_y = self.interpolate_value(dart_pixel_x, self.cam2_pixel_to_board_mapping)
             
+            # Apply smoothing
+            smoothed_board_y = self.apply_smoothing(board_y, 'cam2')
+            
             # Store vector info - we know this passes through (0, board_y) on the board
-            self.cam2_vector = (0, board_y)
+            self.cam2_vector = (0, smoothed_board_y)
             
             # Add debugging info to display
-            cv2.putText(roi, f"Board Y: {board_y:.1f}mm", (10, 20), 
+            cv2.putText(roi, f"Board Y: {smoothed_board_y:.1f}mm", (10, 20), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+            
+            # Print to terminal for monitoring
+            print(f"Camera 2: Detected at pixel x={dart_pixel_x}, mapped to board Y={smoothed_board_y:.1f}mm")
         else:
             self.cam2_vector = None
             
-        # Draw a line at the board plane y-value
-        cv2.line(roi, (0, self.cam2_board_plane_y - self.cam2_roi_top), 
-                     (roi.shape[1], self.cam2_board_plane_y - self.cam2_roi_top), 
-                     (0, 255, 255), 1)
-
         frame_rot[self.cam2_roi_top:self.cam2_roi_bottom, :] = roi
         return frame_rot, fg_mask
-
-    def mm_to_pixel(self, x, y, board_img):
-        """Convert board mm coordinates to pixel coordinates in the board image"""
-        h, w, _ = board_img.shape
-        
-        # Calculate center of the image
-        center_x = w // 2
-        center_y = h // 2
-        
-        # Convert board mm to image pixels (centered at the middle of the image)
-        # Scale factor of 1.0 means 1mm = 1 pixel
-        scale_factor = 0.5
-        pixel_x = int(center_x + x * scale_factor)
-        pixel_y = int(center_y - y * scale_factor)  # Y is inverted in image coordinates
-        
-        return pixel_x, pixel_y
 
     def update_board_projection(self):
         # Create a larger canvas to display the board and camera positions
@@ -333,7 +447,11 @@ class DualCameraEpipolarTrainer:
         # Draw board boundary circle
         cv2.circle(canvas, (canvas_center_x, canvas_center_y), int(self.board_radius * scale_factor), (0, 0, 0), 1)
         
-        # Draw known segment markers for reference (added)
+        # Draw rings for double and triple
+        cv2.circle(canvas, (canvas_center_x, canvas_center_y), int(107 * scale_factor), (0, 0, 0), 1)  # Triple ring
+        cv2.circle(canvas, (canvas_center_x, canvas_center_y), int(170 * scale_factor), (0, 0, 0), 1)  # Double ring
+        
+        # Draw known segment markers for reference
         for segment, (x, y) in self.board_segments.items():
             segment_px = mm_to_canvas_px(x, y)
             cv2.circle(canvas, segment_px, 5, (128, 0, 128), -1)  # Purple dot
@@ -411,30 +529,61 @@ class DualCameraEpipolarTrainer:
             self.final_tip = self.compute_intersection()
             
             if self.final_tip is not None:
-                dart_x, dart_y = self.final_tip
-                final_px = mm_to_canvas_px(dart_x, dart_y)
+                # Apply smoothing to final position
+                smoothed_final_tip = self.apply_smoothing(self.final_tip, 'final')
                 
-                # Draw the intersection point
-                cv2.circle(canvas, final_px, 8, (0, 0, 0), -1)  # Black outline
-                cv2.circle(canvas, final_px, 6, (0, 255, 0), -1)  # Green center
-                
-                # Find closest segment (added)
-                closest_segment = None
-                min_distance = float('inf')
-                for segment, (seg_x, seg_y) in self.board_segments.items():
-                    dist = math.sqrt((dart_x - seg_x)**2 + (dart_y - seg_y)**2)
-                    if dist < min_distance:
-                        min_distance = dist
-                        closest_segment = segment
-                
-                # Draw text with black outline for visibility
-                segment_info = f" (near Seg {closest_segment})" if closest_segment and min_distance < 50 else ""
-                label = f"Dart: ({dart_x:.1f}, {dart_y:.1f}){segment_info}"
-                
-                cv2.putText(canvas, label, (final_px[0]+10, final_px[1]), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
-                cv2.putText(canvas, label, (final_px[0]+10, final_px[1]), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
+                if smoothed_final_tip:
+                    dart_x, dart_y = smoothed_final_tip
+                    final_px = mm_to_canvas_px(dart_x, dart_y)
+                    
+                    # Draw the intersection point
+                    cv2.circle(canvas, final_px, 8, (0, 0, 0), -1)  # Black outline
+                    cv2.circle(canvas, final_px, 6, (0, 255, 0), -1)  # Green center
+                    
+                    # Find closest segment
+                    closest_segment = None
+                    min_distance = float('inf')
+                    for segment, (seg_x, seg_y) in self.board_segments.items():
+                        dist = math.sqrt((dart_x - seg_x)**2 + (dart_y - seg_y)**2)
+                        if dist < min_distance:
+                            min_distance = dist
+                            closest_segment = segment
+                    
+                    # Calculate distance from center (for scoring purposes)
+                    distance_from_center = math.sqrt(dart_x**2 + dart_y**2)
+                    
+                    # Determine if dart is in double, treble, or bullseye
+                    in_double = 169 <= distance_from_center <= 171
+                    in_treble = 105 <= distance_from_center <= 107
+                    in_bullseye = distance_from_center <= 12.7  # Standard bullseye radius
+                    in_outer_bull = 12.7 < distance_from_center <= 31.8  # Standard outer bull radius
+                    
+                    # Determine hit description
+                    hit_description = ""
+                    if in_bullseye:
+                        hit_description = "BULLSEYE (50)"
+                    elif in_outer_bull:
+                        hit_description = "OUTER BULL (25)"
+                    elif in_double:
+                        hit_description = f"DOUBLE {closest_segment} ({closest_segment * 2})"
+                    elif in_treble:
+                        hit_description = f"TREBLE {closest_segment} ({closest_segment * 3})"
+                    elif closest_segment:
+                        hit_description = f"SEGMENT {closest_segment}"
+                    
+                    # Draw text with black outline for visibility
+                    segment_info = f" - {hit_description}" if hit_description else ""
+                    label = f"Dart: ({dart_x:.1f}, {dart_y:.1f}){segment_info}"
+                    
+                    cv2.putText(canvas, label, (final_px[0]+10, final_px[1]), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+                    cv2.putText(canvas, label, (final_px[0]+10, final_px[1]), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
+                    
+                    # Print hit information to terminal
+                    print(f"\nDart hit at ({dart_x:.1f}, {dart_y:.1f}) mm")
+                    print(f"Distance from center: {distance_from_center:.1f} mm")
+                    print(f"Hit: {hit_description}")
         else:
             self.final_tip = None
 
@@ -468,6 +617,23 @@ class DualCameraEpipolarTrainer:
         
         return intersection
 
+    def toggle_calibration_mode(self):
+        """Toggle calibration mode on/off"""
+        self.calibration_mode = not self.calibration_mode
+        if self.calibration_mode:
+            print("\n*** CALIBRATION MODE ACTIVATED ***")
+            print("Place dart at known positions and press 'c' to capture pixel values")
+            print("Press 't' to toggle calibration mode off when done")
+        else:
+            print("\n*** CALIBRATION MODE DEACTIVATED ***")
+            self.calibration_point = None
+
+    def set_calibration_point(self, board_x, board_y):
+        """Set the current calibration point coordinates"""
+        self.calibration_point = (board_x, board_y)
+        print(f"\nCalibration point set to ({board_x}, {board_y})")
+        print("Place dart at this position and press 'c' to capture pixel values")
+
     def run(self):
         cap1 = cv2.VideoCapture(self.cam_index1)
         cap1.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
@@ -477,7 +643,18 @@ class DualCameraEpipolarTrainer:
         cap2.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
         cap2.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
 
+        print("\n*** DUAL CAMERA DART TRACKER ***")
         print("Press 'q' to exit.")
+        print("Press 't' to toggle calibration mode.")
+        print("Press 'c' in calibration mode to capture current point.")
+        print("Press 'r' to reset background subtractors.")
+        print("Press 's' to save current calibration to file.")
+        print("Press 'l' to load calibration from file.")
+        
+        # FPS calculation variables
+        prev_time = time.time()
+        frame_count = 0
+        fps = 0
         
         while True:
             ret1, frame1 = cap1.read()
@@ -486,9 +663,29 @@ class DualCameraEpipolarTrainer:
                 print("Error reading from one or both cameras.")
                 break
 
+            # Calculate FPS
+            current_time = time.time()
+            frame_count += 1
+            if (current_time - prev_time) > 1.0:
+                fps = frame_count / (current_time - prev_time)
+                frame_count = 0
+                prev_time = current_time
+
             proc_frame1, fg_mask1 = self.process_camera1_frame(frame1)
             proc_frame2, fg_mask2 = self.process_camera2_frame(frame2)
             board_proj = self.update_board_projection()
+            
+            # Add FPS counter to board projection
+            cv2.putText(board_proj, f"FPS: {fps:.1f}", (10, 30), 
+                      cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+                      
+            # Add calibration mode indicator if active
+            if self.calibration_mode:
+                cv2.putText(board_proj, "CALIBRATION MODE", (10, 60), 
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                if self.calibration_point:
+                    cv2.putText(board_proj, f"Current point: {self.calibration_point}", (10, 90), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
             cv2.imshow("Camera 1 Feed", proc_frame1)
             cv2.imshow("Camera 1 FG Mask", fg_mask1)
@@ -496,8 +693,86 @@ class DualCameraEpipolarTrainer:
             cv2.imshow("Camera 2 FG Mask", fg_mask2)
             cv2.imshow("Board Projection", board_proj)
 
-            if cv2.waitKey(1) & 0xFF == ord("q"):
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q"):
                 break
+            elif key == ord("t"):
+                self.toggle_calibration_mode()
+            elif key == ord("c") and self.calibration_mode:
+                if self.calibration_point is None:
+                    print("Please set calibration point first (using number keys 0-9)")
+                else:
+                    cam1_pixel = None
+                    cam2_pixel = None
+                    # Get current pixel values from last detection
+                    if self.cam1_vector is not None:
+                        for contour in cv2.findContours(fg_mask1, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]:
+                            if cv2.contourArea(contour) > 20:
+                                x, y, w, h = cv2.boundingRect(contour)
+                                cam1_pixel = x + w // 2
+                                break
+                    
+                    if self.cam2_vector is not None:
+                        for contour in cv2.findContours(fg_mask2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]:
+                            if cv2.contourArea(contour) > 20:
+                                x, y, w, h = cv2.boundingRect(contour)
+                                cam2_pixel = x + w // 2
+                                break
+                    
+                    if cam1_pixel is not None and cam2_pixel is not None:
+                        print(f"Calibration point: ({self.calibration_point[0]}, {self.calibration_point[1]}) => Cam1: {cam1_pixel}, Cam2: {cam2_pixel}")
+                        print(f"Add to calibration points: ({self.calibration_point[0]}, {self.calibration_point[1]}, {cam1_pixel}, {cam2_pixel})")
+                        # Add to calibration points
+                        self.calibration_points[self.calibration_point] = (cam1_pixel, cam2_pixel)
+                        # Rebuild mapping tables
+                        self.cam1_pixel_to_board_mapping = []
+                        self.cam2_pixel_to_board_mapping = []
+                        for (board_x, board_y), (cam1_pixel_x, cam2_pixel_x) in self.calibration_points.items():
+                            self.cam1_pixel_to_board_mapping.append((cam1_pixel_x, board_x))
+                            self.cam2_pixel_to_board_mapping.append((cam2_pixel_x, board_y))
+                        self.cam1_pixel_to_board_mapping.sort(key=lambda x: x[0])
+                        self.cam2_pixel_to_board_mapping.sort(key=lambda x: x[0])
+                    else:
+                        print("Could not detect dart in one or both cameras")
+            elif key == ord("r"):
+                print("Resetting background subtractors")
+                self.bg_subtractor1 = cv2.createBackgroundSubtractorMOG2(history=300, varThreshold=67, detectShadows=False)
+                self.bg_subtractor2 = cv2.createBackgroundSubtractorMOG2(history=300, varThreshold=67, detectShadows=False)
+            elif key == ord("s"):
+                print("Saving calibration points to file")
+                try:
+                    import json
+                    with open("dart_calibration.json", "w") as f:
+                        json.dump({str(k): v for k, v in self.calibration_points.items()}, f)
+                    print("Calibration saved successfully")
+                except Exception as e:
+                    print(f"Error saving calibration: {e}")
+            elif key == ord("l"):
+                print("Loading calibration points from file")
+                try:
+                    import json
+                    import ast
+                    with open("dart_calibration.json", "r") as f:
+                        loaded_points = json.load(f)
+                        self.calibration_points = {ast.literal_eval(k): v for k, v in loaded_points.items()}
+                    # Rebuild mapping tables
+                    self.cam1_pixel_to_board_mapping = []
+                    self.cam2_pixel_to_board_mapping = []
+                    for (board_x, board_y), (cam1_pixel_x, cam2_pixel_x) in self.calibration_points.items():
+                        self.cam1_pixel_to_board_mapping.append((cam1_pixel_x, board_x))
+                        self.cam2_pixel_to_board_mapping.append((cam2_pixel_x, board_y))
+                    self.cam1_pixel_to_board_mapping.sort(key=lambda x: x[0])
+                    self.cam2_pixel_to_board_mapping.sort(key=lambda x: x[0])
+                    print("Calibration loaded successfully")
+                except Exception as e:
+                    print(f"Error loading calibration: {e}")
+            elif key >= ord("0") and key <= ord("9") and self.calibration_mode:
+                # Quick set calibration point using number keys
+                segment_num = key - ord("0")
+                if segment_num in self.board_segments:
+                    self.set_calibration_point(*self.board_segments[segment_num])
+                else:
+                    print(f"No segment {segment_num} defined")
 
         cap1.release()
         cap2.release()
