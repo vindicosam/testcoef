@@ -1,461 +1,575 @@
-import cv2
-import numpy as np
-import math
-import time
-
-class CameraDebugger:
-    def __init__(self):
-        # Camera configuration - HARDCODED VALUES
-        self.camera_board_plane_y = 247  # The y-coordinate where the board surface is
-        self.camera_roi_range = 30       # How much above and below to include
-        self.camera_roi_top = self.camera_board_plane_y - self.camera_roi_range
-        self.camera_roi_bottom = self.camera_board_plane_y + self.camera_roi_range
-        self.camera_roi_left = 119       # Left boundary
-        self.camera_roi_right = 604      # Right boundary
+# Copy ROI back to rotated frame
+        frame_rot[self.cam2_roi_top:self.cam2_roi_bottom, :] = roi
         
-        # Default linear calibration for pixel-to-mm conversion
-        self.pixel_to_mm_factor = -0.628  # Slope in mm/pixel 
-        self.pixel_offset = 192.8        # Board y when pixel_x = 0
-        
-        # Detection persistence
-        self.last_valid_detection = {"dart_pixel_x": None, "dart_angle": None, "dart_mm_y": None}
-        self.detection_persistence_counter = 0
-        self.detection_persistence_frames = 30
-        
-        # Background subtractor with improved parameters for fast movement
-        self.camera_bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history=30,  # Reduced from 75 to adapt faster
-            varThreshold=35,  # More sensitive than 50
-            detectShadows=False
-        )
-        
-        # Previous frame storage for frame differencing
-        self.prev_gray = None
-        
-        # Flags and storage
-        self.running = True
-        self.camera_data = {"dart_pixel_x": None, "dart_angle": None, "dart_mm_y": None}
-        
-        # Visualization flags - enable/disable different components
-        self.show_original = True
-        self.show_roi = True
-        self.show_background = True
-        self.show_angle = True
-        self.show_epipolar = True
-        self.show_diff = True  # Show frame differencing result
-        
-        # Create windows
-        cv2.namedWindow("Camera Feed", cv2.WINDOW_NORMAL)
-        cv2.namedWindow("ROI", cv2.WINDOW_NORMAL)
-        cv2.namedWindow("Background Mask", cv2.WINDOW_NORMAL)
-        cv2.namedWindow("Board Visualization", cv2.WINDOW_NORMAL)
-        cv2.namedWindow("Frame Difference", cv2.WINDOW_NORMAL)  # New window for frame differencing
-        
-        # Trackbars for parameter tuning (ONLY non-ROI parameters)
-        cv2.createTrackbar("BG History", "Background Mask", 30, 200, self.update_bg_history)
-        cv2.createTrackbar("BG Threshold", "Background Mask", 35, 100, self.update_bg_threshold)
-        cv2.createTrackbar("Diff Threshold", "Frame Difference", 25, 100, self.update_diff_threshold)
-        
-        # Thresholds for frame differencing and contour detection
-        self.diff_threshold = 25
-        self.min_contour_area = 30  # Reduced from 50
-        
-    def update_bg_history(self, value):
-        # Recreate the background subtractor with new history parameter
-        self.camera_bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history=value, 
-            varThreshold=self.camera_bg_subtractor.getVarThreshold(),
-            detectShadows=False
-        )
-        
-    def update_bg_threshold(self, value):
-        # Recreate the background subtractor with new threshold parameter
-        self.camera_bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history=self.camera_bg_subtractor.getHistory(),
-            varThreshold=value,
-            detectShadows=False
-        )
-        
-    def update_diff_threshold(self, value):
-        self.diff_threshold = value
+        return frame_rot, fg_mask, dart_pixel_x
     
-    def pixel_to_mm(self, pixel_x):
+    def compute_intersection(self):
         """
-        Convert pixel x-coordinate to mm y-coordinate using linear equation.
+        Compute intersection of the vectors from both cameras.
+        Enhanced version with additional validation.
         """
-        return self.pixel_to_mm_factor * pixel_x + self.pixel_offset
+        if self.cam1_vector is None or self.cam2_vector is None:
+            return None
+            
+        # For cam1, we've determined the board_x value
+        cam1_board_x = self.cam1_vector[0]
+        cam1_ray_start = self.camera1_position
+        cam1_ray_end = (cam1_board_x, 0)
         
-    def measure_tip_angle(self, mask, tip_point):
+        # For cam2, we've determined the board_y value
+        cam2_board_y = self.cam2_vector[1]
+        cam2_ray_start = self.camera2_position
+        cam2_ray_end = (0, cam2_board_y)
+        
+        # Find the intersection of these rays
+        intersection = self.compute_line_intersection(
+            cam1_ray_start, cam1_ray_end,
+            cam2_ray_start, cam2_ray_end
+        )
+        
+        # Validate intersection is within reasonable bounds of the board
+        if intersection:
+            x, y = intersection
+            distance_from_center = math.sqrt(x*x + y*y)
+            
+            # Check if the point is within a reasonable distance from the board
+            if distance_from_center <= self.board_radius + 10:  # 10mm margin
+                return intersection
+        
+        return None
+    
+    def compute_line_intersection(self, p1, p2, p3, p4):
         """
-        Measure the angle of the dart tip using RANSAC fitting.
+        Compute the intersection of two lines.
+        Enhanced version for better numerical stability.
+        """
+        # Convert inputs to numpy arrays for better handling
+        p1 = np.array(p1, dtype=np.float64)
+        p2 = np.array(p2, dtype=np.float64)
+        p3 = np.array(p3, dtype=np.float64)
+        p4 = np.array(p4, dtype=np.float64)
+        
+        # Calculate direction vectors
+        v1 = p2 - p1
+        v2 = p4 - p3
+        
+        # Calculate cross product to check if lines are parallel
+        cross_product = v1[0] * v2[1] - v1[1] * v2[0]
+        
+        # If lines are parallel (or nearly parallel)
+        if abs(cross_product) < 1e-10:
+            return None
+        
+        # Calculate intersection parameter for first line
+        v3 = p1 - p3
+        t = (v2[0] * v3[1] - v2[1] * v3[0]) / cross_product
+        
+        # Calculate intersection point
+        intersection = p1 + t * v1
+        
+        return tuple(intersection)
+    
+    def calculate_score(self, position):
+        """
+        Calculate score based on dart position
         
         Args:
-            mask: Binary mask containing dart
-            tip_point: Detected tip coordinates (x,y)
+            position: (x, y) position in board coordinates
             
         Returns:
-            angle: Angle in degrees (90° = vertical) or None if angle couldn't be calculated
+            score: Score value
+            description: Text description of the hit
         """
-        if tip_point is None:
-            return None
+        if position is None:
+            return 0, "No hit"
             
-        tip_x, tip_y = tip_point
+        x, y = position
+        distance_from_center = math.sqrt(x*x + y*y)
         
-        # Define search parameters
-        search_depth = 25  # How far to search from the tip
-        search_width = 40  # Width of search area
-        min_points = 6     # Reduced from 8 to be more tolerant with fast movement
+        # Check if dart is outside the board
+        if distance_from_center > self.board_radius:
+            return 0, "Outside board"
+            
+        # Check bullseye
+        if distance_from_center <= 12.7:  # Inner bullseye
+            return 50, "Bullseye (50)"
+        elif distance_from_center <= 31.8:  # Outer bullseye
+            return 25, "Outer bull (25)"
+            
+        # Determine segment number based on angle
+        angle_rad = math.atan2(y, x)
+        angle_deg = math.degrees(angle_rad)
         
-        # Define region to search for the dart shaft
-        # For a left camera, search to the right of the tip point
-        min_x = max(0, tip_x)
-        max_x = min(mask.shape[1] - 1, tip_x + search_depth)
-        min_y = max(0, tip_y - search_width)
-        max_y = min(mask.shape[0] - 1, tip_y + search_width)
+        # Convert to 0-360 range
+        if angle_deg < 0:
+            angle_deg += 360
+            
+        # Calculate segment index (20 segments, starting from top and going clockwise)
+        segment_angle = (450 - angle_deg) % 360
+        segment_index = int(segment_angle / 18)  # Each segment is 18 degrees
         
-        # Find all white pixels in the search area
-        points_right = []
-        for x in range(min_x, max_x + 1):
-            for y in range(min_y, max_y + 1):
-                if mask[y, x] > 0:  # White pixel
-                    points_right.append((x, y))
+        # Map to dartboard segment numbers
+        segment_map = [
+            20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5
+        ]
         
-        if len(points_right) < min_points:  # Need enough points for a good fit
-            return None
-            
-        # Use RANSAC for robust angle estimation
-        best_angle = None
-        best_inliers = 0
+        segment_number = segment_map[segment_index % 20]
         
-        for _ in range(10):  # Try several random samples
-            if len(points_right) < 2:
-                continue
-                
-            # Randomly select two points
-            indices = np.random.choice(len(points_right), 2, replace=False)
-            p1 = points_right[indices[0]]
-            p2 = points_right[indices[1]]
+        # Determine multiplier based on distance
+        if 169 <= distance_from_center <= 171:  # Double ring
+            multiplier = 2
+            hit_type = "Double"
+        elif 105 <= distance_from_center <= 107:  # Triple ring
+            multiplier = 3
+            hit_type = "Triple"
+        else:  # Single
+            multiplier = 1
+            hit_type = "Single"
             
-            # Skip if points are too close together
-            dx = p2[0] - p1[0]
-            dy = p2[1] - p1[1]
-            dist = math.sqrt(dx*dx + dy*dy)
-            if dist < 5:
-                continue
-                
-            # Calculate slope
-            if dx == 0:  # Vertical line
-                slope = float('inf')
-                angle = 90  # Vertical
-            else:
-                slope = dy / dx
-                # Convert slope to angle in degrees (relative to vertical)
-                angle_from_horizontal = math.degrees(math.atan(slope))
-                angle = 90 - angle_from_horizontal
-            
-            # Count inliers
-            inliers = []
-            for point in points_right:
-                # Distance from point to line defined by p1, p2
-                if dx == 0:  # Vertical line
-                    dist_to_line = abs(point[0] - p1[0])
-                else:
-                    a = -slope
-                    b = 1
-                    c = slope * p1[0] - p1[1]
-                    dist_to_line = abs(a*point[0] + b*point[1] + c) / math.sqrt(a*a + b*b)
-                
-                if dist_to_line < 2:  # Threshold distance for inlier
-                    inliers.append(point)
-            
-            if len(inliers) > best_inliers:
-                best_inliers = len(inliers)
-                best_angle = angle
-                # Store inlier points for visualization
-                self.inlier_points = inliers
+        score = segment_number * multiplier
         
-        if best_angle is None:
-            # Fall back to simple linear regression if RANSAC fails
-            points = np.array(points_right)
-            if len(points) < 2:
-                return None
-                
-            x = points[:, 0]
-            y = points[:, 1]
+        if multiplier > 1:
+            description = f"{hit_type} {segment_number} ({score})"
+        else:
+            description = f"{segment_number}"
             
-            # Calculate slope using least squares
-            x_mean = np.mean(x)
-            y_mean = np.mean(y)
-            
-            numerator = np.sum((x - x_mean) * (y - y_mean))
-            denominator = np.sum((x - x_mean) ** 2)
-            
-            if denominator == 0:  # Avoid division by zero
-                slope = float('inf')
-                best_angle = 90  # Vertical line
-            else:
-                slope = numerator / denominator
-                angle_from_horizontal = math.degrees(math.atan(slope))
-                best_angle = 90 - angle_from_horizontal
-            # No inlier points for visualization in this case
-            self.inlier_points = points_right
-        
-        return best_angle
+        return score, description
     
-    def draw_angle_line(self, roi_image, tip_point, angle):
-        """Draw a line showing the dart angle on the image."""
-        if tip_point is None or angle is None:
-            return roi_image
+    def update_board_projection(self, cam1_pixel_x=None, cam2_pixel_x=None):
+        """
+        Update board projection with current dart position
+        Enhanced version with improved visualization and accuracy
+        
+        Args:
+            cam1_pixel_x, cam2_pixel_x: Raw pixel values from cameras (optional)
+        """
+        # Create a larger canvas to display the board and camera positions
+        canvas_size = 1200
+        canvas = np.ones((canvas_size, canvas_size, 3), dtype=np.uint8) * 255
+        
+        # Calculate the scale factor to fit the board properly
+        board_px_radius = 200
+        scale_factor = board_px_radius / self.board_radius
+        
+        # Calculate center of the canvas
+        canvas_center_x = canvas_size // 2
+        canvas_center_y = canvas_size // 2
+        
+        # Function to convert from mm coordinates to canvas pixel coordinates
+        def mm_to_canvas_px(x, y):
+            px = int(canvas_center_x + x * scale_factor)
+            py = int(canvas_center_y - y * scale_factor)
+            return (px, py)
+        
+        # Draw the board image
+        if self.board_image is not None:
+            # Calculate size to make the dartboard fill the boundary circle
+            board_size = int(self.board_radius * 2 * scale_factor)
+            image_scale_multiplier = 2.75  # Adjust to make dartboard fill boundary
+            board_img_size = int(board_size * image_scale_multiplier)
             
-        # Copy image to avoid modifying original
-        vis_img = roi_image.copy()
+            board_resized = cv2.resize(self.board_image, (board_img_size, board_img_size))
+            
+            # Calculate position to paste the board image (centered)
+            board_x = canvas_center_x - board_img_size // 2
+            board_y = canvas_center_y - board_img_size // 2
+            
+            # Create circular mask
+            mask = np.zeros((board_img_size, board_img_size), dtype=np.uint8)
+            cv2.circle(mask, (board_img_size//2, board_img_size//2), board_img_size//2, 255, -1)
+            
+            # Paste board image with mask
+            if (board_x >= 0 and board_y >= 0 and 
+                board_x + board_img_size <= canvas_size and 
+                board_y + board_img_size <= canvas_size):
+                canvas_roi = canvas[board_y:board_y+board_img_size, board_x:board_x+board_img_size]
+                board_masked = cv2.bitwise_and(board_resized, board_resized, mask=mask)
+                canvas_roi[mask > 0] = board_masked[mask > 0]
         
-        # Line length
-        line_length = 30
+        # Draw reference grid and board circles
+        cv2.line(canvas, (0, canvas_center_y), (canvas_size, canvas_center_y), (200, 200, 200), 1)
+        cv2.line(canvas, (canvas_center_x, 0), (canvas_center_x, canvas_size), (200, 200, 200), 1)
         
-        # Calculate line endpoint based on angle
-        # angle of 90° means vertical (pointing right)
-        radians = math.radians(90 - angle)  # Convert to radians from vertical
-        end_x = int(tip_point[0] + line_length * math.cos(radians))
-        end_y = int(tip_point[1] + line_length * math.sin(radians))
+        # Draw board boundary and rings
+        cv2.circle(canvas, (canvas_center_x, canvas_center_y), 
+                 int(self.board_radius * scale_factor), (0, 0, 0), 1)
+        cv2.circle(canvas, (canvas_center_x, canvas_center_y), 
+                 int(107 * scale_factor), (0, 0, 0), 1)  # Triple ring
+        cv2.circle(canvas, (canvas_center_x, canvas_center_y), 
+                 int(170 * scale_factor), (0, 0, 0), 1)  # Double ring
         
-        # Draw the line
-        cv2.line(vis_img, tip_point, (end_x, end_y), (0, 0, 255), 2)
+        # Draw bullseye rings
+        cv2.circle(canvas, (canvas_center_x, canvas_center_y), 
+                 int(12.7 * scale_factor), (0, 0, 0), 1)  # Inner bull
+        cv2.circle(canvas, (canvas_center_x, canvas_center_y), 
+                 int(31.8 * scale_factor), (0, 0, 0), 1)  # Outer bull
         
-        # Add angle text
-        cv2.putText(vis_img, f"{angle:.1f}°", (tip_point[0] + 5, tip_point[1] - 10), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+        # Draw segment markers
+        for segment, (x, y) in self.board_segments.items():
+            segment_px = mm_to_canvas_px(x, y)
+            cv2.circle(canvas, segment_px, 3, (128, 0, 128), -1)
+            cv2.putText(canvas, f"{segment}", (segment_px[0]+5, segment_px[1]-5),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (128, 0, 128), 1)
         
-        # Draw inlier points if available
-        if hasattr(self, 'inlier_points') and self.inlier_points:
-            for point in self.inlier_points:
-                cv2.circle(vis_img, point, 1, (0, 255, 0), -1)
+        # Draw camera positions
+        cam1_px = mm_to_canvas_px(*self.camera1_position)
+        cam2_px = mm_to_canvas_px(*self.camera2_position)
         
-        return vis_img
+        cv2.circle(canvas, cam1_px, 8, (0, 255, 255), -1)
+        cv2.putText(canvas, "Cam1", (cam1_px[0]+10, cam1_px[1]-10),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        cv2.circle(canvas, cam2_px, 8, (255, 255, 0), -1)
+        cv2.putText(canvas, "Cam2", (cam2_px[0]+10, cam2_px[1]-10),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+        
+        # Advanced interpolation when both cameras have detections
+        if cam1_pixel_x is not None and cam2_pixel_x is not None and self.use_advanced_interpolation:
+            # Perform advanced interpolation
+            board_x, board_y = self.advanced_interpolation(cam1_pixel_x, cam2_pixel_x)
+            
+            # Apply Kalman filtering for smooth tracking
+            if board_x is not None and board_y is not None:
+                # Update Kalman filter
+                filtered_position = self.update_kalman((board_x, board_y))
+                
+                if filtered_position is not None:
+                    # Apply additional smoothing if needed
+                    smoothed_position = self.apply_smoothing(filtered_position, 'final')
+                    
+                    if smoothed_position is not None:
+                        # Store final position
+                        self.final_tip = smoothed_position
+                        
+                        # Check for stable position
+                        if self.last_stable_position is not None:
+                            # Calculate movement from last stable position
+                            dx = smoothed_position[0] - self.last_stable_position[0]
+                            dy = smoothed_position[1] - self.last_stable_position[1]
+                            movement = math.sqrt(dx*dx + dy*dy)
+                            
+                            # If movement is below threshold, increment stable counter
+                            if movement < self.movement_threshold:
+                                self.stable_position_count += 1
+                            else:
+                                self.stable_position_count = 0
+                        
+                        # Update last stable position
+                        self.last_stable_position = smoothed_position
+                        
+                        # Draw the dart position on board
+                        dart_px = mm_to_canvas_px(*smoothed_position)
+                        
+                        # Color based on stability
+                        if self.stable_position_count >= 10:
+                            # Stable position (yellow)
+                            color = (0, 255, 255)
+                        else:
+                            # Moving position (green)
+                            color = (0, 255, 0)
+                        
+                        # Draw dart position
+                        cv2.circle(canvas, dart_px, 8, (0, 0, 0), -1)  # Black outline
+                        cv2.circle(canvas, dart_px, 6, color, -1)  # Colored center
+                        
+                        # Display coordinates
+                        x, y = smoothed_position
+                        cv2.putText(canvas, f"({x:.1f}, {y:.1f})", (dart_px[0]+10, dart_px[1]),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
+                        cv2.putText(canvas, f"({x:.1f}, {y:.1f})", (dart_px[0]+10, dart_px[1]),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                        
+                        # Calculate and display score
+                        score, description = self.calculate_score(smoothed_position)
+                        
+                        score_text = f"Score: {score} - {description}"
+                        cv2.putText(canvas, score_text, (dart_px[0]+10, dart_px[1]+25),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
+                        cv2.putText(canvas, score_text, (dart_px[0]+10, dart_px[1]+25),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                        
+                        # If position is stable for a while, display "STABLE" indicator
+                        if self.stable_position_count >= 10:
+                            cv2.putText(canvas, "STABLE", (dart_px[0]-20, dart_px[1]-20),
+                                      cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        else:
+            # Standard processing from original code
+            # --- Cam1 vector ---
+            if self.cam1_vector is not None:
+                board_point = mm_to_canvas_px(*self.cam1_vector)
+                cv2.circle(canvas, board_point, 5, (0, 0, 255), -1)
+                cv2.putText(canvas, f"X: {self.cam1_vector[0]:.1f}", (board_point[0]+5, board_point[1]-5),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                
+                # Draw vector from camera
+                cv2.line(canvas, cam1_px, board_point, (0, 0, 255), 2)
+                
+                # Calculate and draw extended vector
+                dx = board_point[0] - cam1_px[0]
+                dy = board_point[1] - cam1_px[1]
+                length = math.sqrt(dx*dx + dy*dy)
+                
+                if length > 0:
+                    extension_factor = 2.0
+                    extended_x = int(board_point[0] + dx * extension_factor)
+                    extended_y = int(board_point[1] + dy * extension_factor)
+                    extended_pt = (extended_x, extended_y)
+                    cv2.line(canvas, board_point, extended_pt, (0, 0, 255), 2)
+            
+            # --- Cam2 vector ---
+            if self.cam2_vector is not None:
+                board_point = mm_to_canvas_px(*self.cam2_vector)
+                cv2.circle(canvas, board_point, 5, (255, 0, 0), -1)
+                cv2.putText(canvas, f"Y: {self.cam2_vector[1]:.1f}", (board_point[0]+5, board_point[1]-5),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+                
+                # Draw vector from camera
+                cv2.line(canvas, cam2_px, board_point, (255, 0, 0), 2)
+                
+                # Calculate and draw extended vector
+                dx = board_point[0] - cam2_px[0]
+                dy = board_point[1] - cam2_px[1]
+                length = math.sqrt(dx*dx + dy*dy)
+                
+                if length > 0:
+                    extension_factor = 2.0
+                    extended_x = int(board_point[0] + dx * extension_factor)
+                    extended_y = int(board_point[1] + dy * extension_factor)
+                    extended_pt = (extended_x, extended_y)
+                    cv2.line(canvas, board_point, extended_pt, (255, 0, 0), 2)
+            
+            # --- Final Dart Position from vector intersection ---
+            if self.cam1_vector is not None and self.cam2_vector is not None:
+                # Calculate intersection
+                self.final_tip = self.compute_intersection()
+                
+                if self.final_tip is not None:
+                    # Apply smoothing
+                    smoothed_final_tip = self.apply_smoothing(self.final_tip, 'final')
+                    
+                    if smoothed_final_tip:
+                        dart_x, dart_y = smoothed_final_tip
+                        final_px = mm_to_canvas_px(dart_x, dart_y)
+                        
+                        # Draw intersection point
+                        cv2.circle(canvas, final_px, 8, (0, 0, 0), -1)  # Black outline
+                        cv2.circle(canvas, final_px, 6, (0, 255, 0), -1)  # Green center
+                        
+                        # Calculate score and description
+                        score, description = self.calculate_score(smoothed_final_tip)
+                        
+                        # Display position and score
+                        label = f"Dart: ({dart_x:.1f}, {dart_y:.1f}) - {description}"
+                        
+                        cv2.putText(canvas, label, (final_px[0]+10, final_px[1]),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+                        cv2.putText(canvas, label, (final_px[0]+10, final_px[1]),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
+                        
+                        # Print hit information to terminal
+                        print(f"\nDart hit at ({dart_x:.1f}, {dart_y:.1f}) mm")
+                        print(f"Distance from center: {math.sqrt(dart_x**2 + dart_y**2):.1f} mm")
+                        print(f"Score: {score} - {description}")
+        
+        # Add calibration mode indicator if active
+        if self.calibration_mode:
+            cv2.putText(canvas, "CALIBRATION MODE", (10, 30),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            if self.calibration_point:
+                cv2.putText(canvas, f"Current point: {self.calibration_point}", (10, 60),
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                
+                # Highlight current calibration point on board
+                cal_px = mm_to_canvas_px(*self.calibration_point)
+                cv2.circle(canvas, cal_px, 10, (0, 0, 255), 2)
+                cv2.line(canvas, (cal_px[0]-15, cal_px[1]-15), (cal_px[0]+15, cal_px[1]+15), (0, 0, 255), 2)
+                cv2.line(canvas, (cal_px[0]-15, cal_px[1]+15), (cal_px[0]+15, cal_px[1]-15), (0, 0, 255), 2)
+        
+        # Add FPS counter
+        cv2.putText(canvas, f"FPS: {self.fps:.1f}", (10, canvas_size-20),
+                  cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
+                  
+        # Add accuracy indicator (1mm target)
+        cv2.putText(canvas, "Target accuracy: 1mm", (canvas_size-250, canvas_size-20),
+                  cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
+        
+        return canvas
     
-    def draw_epipolar_line(self, width=400, height=400, dart_y=None):
-        """Create a visualization of the dartboard with the epipolar line."""
-        # Create a blank image to represent the dartboard
-        board_img = np.ones((height, width, 3), dtype=np.uint8) * 255
+    def toggle_calibration_mode(self):
+        """Toggle calibration mode on/off"""
+        self.calibration_mode = not self.calibration_mode
+        if self.calibration_mode:
+            print("\n*** CALIBRATION MODE ACTIVATED ***")
+            print("Place dart at known positions and press 'c' to capture pixel values")
+            print("Press 't' to toggle calibration mode off when done")
+        else:
+            print("\n*** CALIBRATION MODE DEACTIVATED ***")
+            self.calibration_point = None
+    
+    def set_calibration_point(self, board_x, board_y):
+        """Set the current calibration point coordinates"""
+        self.calibration_point = (board_x, board_y)
+        print(f"\nCalibration point set to ({board_x}, {board_y})")
+        print("Place dart at this position and press 'c' to capture pixel values")
+    
+    def optimize_existing_calibration(self):
+        """
+        Optimize the existing calibration data by:
+        1. Adding interpolated points
+        2. Refining calibration with polynomial fitting
+        3. Validating accuracy using cross-validation
+        """
+        print("\nOptimizing existing calibration...")
         
-        # Draw board center
-        center = (width // 2, height // 2)
-        cv2.circle(board_img, center, 5, (0, 0, 255), -1)
+        # Create manual calibration enhancer
+        from manual_calibration import ManualCalibrationEnhancer
+        enhancer = ManualCalibrationEnhancer(self.calibration_points)
         
-        # Draw concentric circles to represent dartboard rings
-        radii = [20, 45, 100, 170, 200]  # sample radii
-        for radius in radii:
-            cv2.circle(board_img, center, radius, (200, 200, 200), 1)
+        # Generate enhanced calibration points
+        enhancer.generate_enhanced_calibration()
         
-        # Draw epipolar line (horizontal line through y=dart_y)
-        if dart_y is not None:
-            # Scale from mm to pixels for visualization
-            # Assuming the dartboard is roughly 400x400mm and centered
-            scale_factor = height / 400
-            pixel_y = int(height // 2 - dart_y * scale_factor)
-            
-            if 0 <= pixel_y < height:
-                cv2.line(board_img, (0, pixel_y), (width-1, pixel_y), (0, 0, 255), 2)
-                cv2.putText(board_img, f"y={dart_y:.1f}mm", (10, 20), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+        # Update our calibration points with enhanced ones
+        self.calibration_points = enhancer.calibration_points
         
-        return board_img
+        # Rebuild mapping tables
+        self.cam1_pixel_to_board_mapping = []
+        self.cam2_pixel_to_board_mapping = []
+        for (board_x, board_y), (cam1_pixel_x, cam2_pixel_x) in self.calibration_points.items():
+            self.cam1_pixel_to_board_mapping.append((cam1_pixel_x, board_x))
+            self.cam2_pixel_to_board_mapping.append((cam2_pixel_x, board_y))
+        self.cam1_pixel_to_board_mapping.sort(key=lambda x: x[0])
+        self.cam2_pixel_to_board_mapping.sort(key=lambda x: x[0])
+        
+        print(f"Calibration optimized - now using {len(self.calibration_points)} points")
     
     def run(self):
-        """Main camera detection loop with visualizations."""
-        # Initialize the camera
-        cap = cv2.VideoCapture(0)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        """Run the dart tracking system with optimized settings for 1mm accuracy"""
+        # Initialize cameras
+        cap1 = cv2.VideoCapture(self.cam_index1)
+        cap1.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
+        cap1.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
         
-        # Wait a bit for camera to initialize
-        time.sleep(1)
+        cap2 = cv2.VideoCapture(self.cam_index2)
+        cap2.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
+        cap2.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
         
-        print("Camera initialized. Press 'q' to quit.")
-        print("Press 's' to take a snapshot of the current frame.")
-        print("Press 'r' to reset the background model.")
+        # Try to load calibration data
+        try:
+            self.load_calibration()
+        except:
+            print("Using default calibration data")
         
+        # Print instructions
+        print("\n*** OPTIMIZED DART TRACKING SYSTEM ***")
+        print("Target accuracy: 1mm")
+        print("Press 'q' to exit")
+        print("Press 't' to toggle calibration mode")
+        print("Press 'c' in calibration mode to capture current point")
+        print("Press 'r' to reset background subtractors")
+        print("Press 's' to save current calibration to file")
+        print("Press 'l' to load calibration from file")
+        print("Press 'o' to optimize existing calibration (for 1mm accuracy)")
+        
+        # FPS calculation variables
         frame_count = 0
-        while self.running:
-            ret, frame = cap.read()
-            if not ret:
-                print("Failed to get frame from camera.")
+        fps_start_time = time.time()
+        
+        # Main loop
+        while True:
+            # Read frames
+            ret1, frame1 = cap1.read()
+            ret2, frame2 = cap2.read()
+            
+            if not ret1 or not ret2:
+                print("Error reading from cameras")
                 break
             
-            # Rotate frame 180 degrees
-            frame = cv2.rotate(frame, cv2.ROTATE_180)
+            # Process frames
+            proc_frame1, fg_mask1, cam1_pixel_x = self.process_camera1_frame(frame1)
+            proc_frame2, fg_mask2, cam2_pixel_x = self.process_camera2_frame(frame2)
             
-            # Show original frame with ROI rectangle marked
-            if self.show_original:
-                original_vis = frame.copy()
-                cv2.rectangle(original_vis, 
-                              (self.camera_roi_left, self.camera_roi_top), 
-                              (self.camera_roi_right, self.camera_roi_bottom), 
-                              (0, 255, 0), 2)
-                cv2.imshow("Camera Feed", original_vis)
+            # Update board projection
+            board_proj = self.update_board_projection(cam1_pixel_x, cam2_pixel_x)
             
-            # Extract ROI with fixed dimensions
-            roi = frame[self.camera_roi_top:self.camera_roi_bottom, 
-                        self.camera_roi_left:self.camera_roi_right]
-            
-            # Convert to grayscale
-            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-            
-            # ---- Enhanced motion detection using frame differencing ----
-            if self.prev_gray is None or self.prev_gray.shape != gray.shape:
-                # Initialize or reset previous frame if shapes don't match
-                self.prev_gray = gray.copy()
-            
-            # Calculate absolute difference between current and previous frame
-            frame_diff = cv2.absdiff(gray, self.prev_gray)
-            _, diff_thresh = cv2.threshold(frame_diff, self.diff_threshold, 255, cv2.THRESH_BINARY)
-            
-            # Show frame difference result
-            if self.show_diff:
-                diff_vis = cv2.cvtColor(diff_thresh, cv2.COLOR_GRAY2BGR)
-                cv2.imshow("Frame Difference", diff_vis)
-            
-            # Update previous frame for next iteration
-            self.prev_gray = gray.copy()
-            
-            # Background subtraction
-            fg_mask = self.camera_bg_subtractor.apply(gray)
-            
-            # Lower threshold for foreground detection
-            fg_mask = cv2.threshold(fg_mask, 130, 255, cv2.THRESH_BINARY)[1]  # Reduced from 180
-            
-            # Combine background subtraction with frame differencing to catch fast movement
-            combined_mask = cv2.bitwise_or(fg_mask, diff_thresh)
-            
-            # Morphological operations to enhance the dart with increased dilation
-            kernel = np.ones((3,3), np.uint8)
-            combined_mask = cv2.dilate(combined_mask, kernel, iterations=2)  # Increased from 1
-            
-            # Reset current detection
-            self.camera_data["dart_pixel_x"] = None
-            self.camera_data["dart_angle"] = None
-            self.camera_data["dart_mm_y"] = None
-            
-            # Create a copy of the ROI for visualization
-            roi_vis = roi.copy()
-            
-            # Detect contours
-            contours, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            
-            if contours:
-                # Find contour with suitable size
-                tip_contour = None
-                tip_point = None
-                
-                for contour in contours:
-                    area = cv2.contourArea(contour)
-                    if area > self.min_contour_area:  # Reduced threshold from 50 to 30
-                        x, y, w, h = cv2.boundingRect(contour)
-                        
-                        # Draw contour and bounding box
-                        cv2.drawContours(roi_vis, [contour], -1, (0, 255, 0), 1)
-                        cv2.rectangle(roi_vis, (x, y), (x+w, y+h), (255, 0, 0), 1)
-                        
-                        # Use center as dart tip
-                        dart_pixel_x = x + w // 2
-                        
-                        # Use the board plane as the y-position
-                        roi_center_y = self.camera_board_plane_y - self.camera_roi_top
-                        
-                        if tip_contour is None:
-                            tip_contour = contour
-                            tip_point = (dart_pixel_x, roi_center_y)
-                
-                if tip_contour is not None and tip_point is not None:
-                    # Mark the tip point
-                    cv2.circle(roi_vis, tip_point, 4, (0, 0, 255), -1)
-                    
-                    # Calculate dart angle
-                    dart_angle = self.measure_tip_angle(combined_mask, tip_point)
-                    
-                    # Draw the angle line if angle was successfully calculated
-                    if dart_angle is not None:
-                        roi_vis = self.draw_angle_line(roi_vis, tip_point, dart_angle)
-                    
-                    # Convert to global pixel coordinates
-                    global_pixel_x = tip_point[0] + self.camera_roi_left
-                    
-                    # Map pixels to mm coordinates
-                    dart_mm_y = self.pixel_to_mm(global_pixel_x)
-                    
-                    # Save data
-                    self.camera_data["dart_pixel_x"] = global_pixel_x
-                    self.camera_data["dart_angle"] = dart_angle
-                    self.camera_data["dart_mm_y"] = dart_mm_y
-                    
-                    # Update persistence
-                    self.last_valid_detection = self.camera_data.copy()
-                    self.detection_persistence_counter = self.detection_persistence_frames
-                    
-                    # Print detection data
-                    angle_str = f"{dart_angle:.1f}°" if dart_angle is not None else "None"
-                    print(f"Frame {frame_count}: Detected dart - pixel_x: {global_pixel_x}, " + 
-                          f"angle: {angle_str}, mm_y: {dart_mm_y:.1f}mm")
-            
-            # If no dart detected but we have a valid previous detection
-            elif self.detection_persistence_counter > 0:
-                self.detection_persistence_counter -= 1
-                if self.detection_persistence_counter > 0:
-                    self.camera_data = self.last_valid_detection.copy()
-                    angle_str = f"{self.camera_data['dart_angle']:.1f}°" if self.camera_data['dart_angle'] is not None else "None"
-                    print(f"Frame {frame_count}: Using persistence - " + 
-                          f"pixel_x: {self.camera_data['dart_pixel_x']}, " +
-                          f"angle: {angle_str}, " +
-                          f"mm_y: {self.camera_data['dart_mm_y']:.1f}mm")
-            
-            # Show ROI with detection visualization
-            if self.show_roi:
-                cv2.imshow("ROI", roi_vis)
-            
-            # Show background mask
-            if self.show_background:
-                # Convert to color to make it more visible
-                mask_vis = cv2.cvtColor(combined_mask, cv2.COLOR_GRAY2BGR)
-                cv2.imshow("Background Mask", mask_vis)
-            
-            # Show epipolar line visualization 
-            if self.show_epipolar:
-                dart_mm_y = self.camera_data.get("dart_mm_y")
-                board_vis = self.draw_epipolar_line(dart_y=dart_mm_y)
-                cv2.imshow("Board Visualization", board_vis)
-            
-            # Check for key presses
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord('q'):
-                self.running = False
-            elif key == ord('s'):
-                # Save snapshot of all current views
-                timestamp = time.strftime("%Y%m%d-%H%M%S")
-                cv2.imwrite(f"camera_feed_{timestamp}.png", original_vis)
-                cv2.imwrite(f"roi_view_{timestamp}.png", roi_vis)
-                cv2.imwrite(f"bg_mask_{timestamp}.png", combined_mask)
-                cv2.imwrite(f"diff_mask_{timestamp}.png", diff_thresh)
-                if self.show_epipolar and dart_mm_y is not None:
-                    cv2.imwrite(f"board_vis_{timestamp}.png", board_vis)
-                print(f"Saved snapshots with timestamp {timestamp}")
-            elif key == ord('r'):
-                # Reset background model
-                self.camera_bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-                    history=30,  # Use the faster-adapting history
-                    varThreshold=35,
-                    detectShadows=False
-                )
-                # Also reset frame difference
-                self.prev_gray = gray.copy()
-                print("Background model reset")
-            
+            # Calculate FPS
             frame_count += 1
+            current_time = time.time()
+            elapsed = current_time - fps_start_time
+            
+            if elapsed >= 1.0:
+                self.fps = frame_count / elapsed
+                frame_count = 0
+                fps_start_time = current_time
+            
+            # Display frames
+            cv2.imshow("Camera 1", proc_frame1)
+            cv2.imshow("Camera 2", proc_frame2)
+            cv2.imshow("Board", board_proj)
+            
+            # Handle key presses
+            key = cv2.waitKey(1) & 0xFF
+            
+            if key == ord('q'):
+                break
+            elif key == ord('t'):
+                self.toggle_calibration_mode()
+            elif key == ord('c') and self.calibration_mode:
+                if self.calibration_point is None:
+                    print("Please set calibration point first (using number keys 0-9)")
+                else:
+                    # Add the current detection to calibration points
+                    if cam1_pixel_x is not None and cam2_pixel_x is not None:
+                        print(f"Adding calibration point: {self.calibration_point} -> "
+                             f"Cam1: {cam1_pixel_x:.2f}, Cam2: {cam2_pixel_x:.2f}")
+                        
+                        self.calibration_points[self.calibration_point] = (
+                            int(round(cam1_pixel_x)), 
+                            int(round(cam2_pixel_x))
+                        )
+                        
+                        # Rebuild mapping tables
+                        self.cam1_pixel_to_board_mapping = []
+                        self.cam2_pixel_to_board_mapping = []
+                        for (board_x, board_y), (cam1_pixel_x, cam2_pixel_x) in self.calibration_points.items():
+                            self.cam1_pixel_to_board_mapping.append((cam1_pixel_x, board_x))
+                            self.cam2_pixel_to_board_mapping.append((cam2_pixel_x, board_y))
+                        self.cam1_pixel_to_board_mapping.sort(key=lambda x: x[0])
+                        self.cam2_pixel_to_board_mapping.sort(key=lambda x: x[0])
+                    else:
+                        print("Could not detect dart in one or both cameras")
+            elif key == ord('r'):
+                print("Resetting background subtractors")
+                self.bg_subtractor1 = cv2.createBackgroundSubtractorMOG2(
+                    history=3000, varThreshold=60, detectShadows=False
+                )
+                self.bg_subtractor2 = cv2.createBackgroundSubtractorMOG2(
+                    history=3000, varThreshold=60, detectShadows=False
+                )
+                # Reset Kalman filter
+                self.kalman_initialized = False
+                # Reset stable position tracking
+                self.stable_position_count = 0
+                self.last_stable_position = None
+            elif key == ord('s'):
+                print("Saving calibration to file")
+                self.save_calibration()
+            elif key == ord('l'):
+                print("Loading calibration from file")
+                self.load_calibration()
+            elif key == ord('o'):
+                self.optimize_existing_calibration()
+            elif key >= ord('0') and key <= ord('9') and self.calibration_mode:
+                # Quick set calibration point using number keys
+                segment_num = key - ord('0')
+                if segment_num in self.board_segments:
+                    self.set_calibration_point(*self.board_segments[segment_num])
+                else:
+                    print(f"No segment {segment_num} defined")
         
         # Cleanup
-        cap.release()
+        cap1.release()
+        cap2.release()
         cv2.destroyAllWindows()
-        print("Camera detection stopped.")
 
 if __name__ == "__main__":
-    debugger = CameraDebugger()
-    debugger.run()
+    tracker = OptimizedDartTracker()
+    tracker.run()
