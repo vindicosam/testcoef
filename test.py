@@ -1641,65 +1641,7 @@ class LidarCameraVisualizer:
             artists.append(self.arrow_text)
             
         return artists
-    def calculate_final_tip_position(self, camera_point, lidar1_point, lidar2_point):
-        """
-        Calculate the final tip position using all available data with enhanced 3D lean correction.
-        
-        Args:
-            camera_point: Intersection of camera vector with board
-            lidar1_point: Projected LIDAR 1 point
-            lidar2_point: Projected LIDAR 2 point
-            
-        Returns:
-            (x, y) final estimated tip position
-        """
-    # Points that are actually available
-        valid_lidar_points = []
-        if lidar1_point is not None:
-            valid_lidar_points.append(lidar1_point)
-        if lidar2_point is not None:
-            valid_lidar_points.append(lidar2_point)
-            
-        # If no valid LIDAR points, can't determine position reliably
-        # Camera is now used primarily for lean detection, not for positioning
-        if not valid_lidar_points:
-            return camera_point
-            
-        # If only one LIDAR has data, use that LIDAR for positioning
-        if len(valid_lidar_points) == 1:
-            # Apply the camera's Y position if available
-            if camera_point is not None and self.camera_data["dart_angle"] is not None:
-                # Determine lean direction and apply correction
-                side_lean_angle = self.camera_data["dart_angle"]
-                
-                    # Get the LIDAR point's original coordinates
-                x, y = valid_lidar_points[0]
-                
-                # Apply lean-based Y correction if significant lean detected
-                if side_lean_angle < 85:  # Left lean
-                    # Calculate correction factor based on how much lean (more horizontal = more correction)
-                    lean_factor = (85 - side_lean_angle) / 85.0
-                    # Move Y coordinate DOWN for left lean
-                    y_correction = -lean_factor * self.side_lean_max_adjustment
-                    y += y_correction
-                elif side_lean_angle > 95:  # Right lean
-                    # Calculate correction factor based on how much lean
-                    lean_factor = (side_lean_angle - 95) / 85.0
-                    # Move Y coordinate UP for right lean
-                    y_correction = lean_factor * self.side_lean_max_adjustment
-                    y += y_correction
-                
-                # Apply scale correction
-                x = x * self.x_scale_correction
-                y = y * self.y_scale_correction
-                
-                return (x, camera_point[1])
-            else:
-                # Just use the LIDAR point with scale correction
-                x, y = valid_lidar_points[0]
-                x = x * self.x_scale_correction
-                y = y * self.y_scale_correction
-                return (x, y)
+    
         
         # When both LIDARs have data, we can detect up/down lean and weight accordingly
         up_down_lean_angle, lean_confidence = self.detect_up_down_lean(lidar1_point, lidar2_point)
