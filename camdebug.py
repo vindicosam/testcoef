@@ -1,3 +1,642 @@
+import cv2
+import numpy as np
+import math
+import time
+from collections import deque
+from bisect import bisect_left
+import json
+import ast
+
+class OptimizedDartTracker:
+    def __init__(self, cam_index1=0, cam_index2=2):
+        """
+        Optimized dart tracking system that uses existing calibration points
+        and enhanced detection algorithms to achieve 1mm accuracy
+        """
+        # Camera indices
+        self.cam_index1 = cam_index1
+        self.cam_index2 = cam_index2
+        
+        # Camera settings
+        self.frame_width = 640
+        self.frame_height = 480
+
+        # Static camera positions
+        self.camera1_position = (0, 550)    # Front camera fixed position
+        self.camera2_position = (-400, 0)   # Side camera fixed position
+
+        # Board ROI settings from original code
+        self.cam1_board_plane_y = 190
+        self.cam1_roi_range = 30
+        self.cam1_roi_top = self.cam1_board_plane_y - self.cam1_roi_range
+        self.cam1_roi_bottom = self.cam1_board_plane_y + self.cam1_roi_range
+        
+        self.cam2_board_plane_y = 239
+        self.cam2_roi_range = 30
+        self.cam2_roi_top = self.cam2_board_plane_y - self.cam2_roi_range
+        self.cam2_roi_bottom = self.cam2_board_plane_y + self.cam2_roi_range
+        
+        # Initialize with original calibration points
+        self.calibration_points = {
+            # Format: (board_x, board_y): (cam1_pixel_x, cam2_pixel_x)
+            (0, 0): (310, 314),
+            (-171, 0): (583, 390),
+            (171, 0): (32, 294),
+            (0, 171): (319, 27),
+            (0, -171): (305, 571),
+            (90, 50): (151, 249),
+            (-20, 103): (327, 131),
+            (20, -100): (277, 459),
+            (90, -50): (359, 406),
+            (114, 121, 17, 153): (17, 153),
+            (48, 86, 214, 182): (214, 182),
+            (119, -117, 167, 429): (167, 429),
+            (86, -48, 189, 359): (189, 359),
+            (-118, -121, 453, 624): (453, 624),
+            (-50, -88, 373, 478): (373, 478),
+            (-121, 118, 624, 240): (624, 240),
+            (-90, 47, 483, 42): (483, 42)
+        }
+        
+        # Convert any tuples with 4 elements to proper format
+        calibration_points_fixed = {}
+        for k, v in self.calibration_points.items():
+            if len(k) == 4:  # It's in the format (x, y, px1, px2)
+                calibration_points_fixed[(k[0], k[1])] = (k[2], k[3])
+            else:
+                calibration_points_fixed[k] = v
+        
+        self.calibration_points = calibration_points_fixed
+        
+        # Import segment calibration points from the original code
+        segment_calibration_points = [
+            # Double segments (outer ring)
+            (0, 169, 324, 31),      # Double 20 (top)
+            (52, 161, 165, 78),     # Double 1
+            (98, 139, 51, 129),     # Double 18
+            (139, 98, 15, 184),     # Double 4
+            (161, 52, 18, 239),     # Double 13
+            (169, 0, 49, 294),      # Double 6 (right)
+            (161, -52, 97, 347),    # Double 10
+            (139, -98, 150, 403),   # Double 15
+            (98, -139, 203, 457),   # Double 2
+            (52, -161, 260, 515),   # Double 17
+            (0, -169, 312, 566),    # Double 3 (bottom)
+            (-52, -161, 370, 612),  # Double 19
+            (-98, -139, 428, 629),  # Double 7
+            (-139, -98, 484, 610),  # Double 16
+            (-161, -52, 536, 532),  # Double 8
+            (-169, 0, 588, 384),    # Double 11 (left)
+            (-161, 52, 624, 206),   # Double 14
+            (-139, 98, 633, 79),    # Double 9
+            (-98, 139, 593, 14),    # Double 12
+            (-52, 161, 490, 5),     # Double 5
+
+            # Triple segments (middle ring)
+            (0, 106, 324, 160),     # Triple 20 (top)
+            (33, 101, 246, 178),    # Triple 1
+            (62, 87, 189, 205),     # Triple 18
+            (87, 62, 155, 237),     # Triple 4
+            (101, 33, 144, 275),    # Triple 13
+            (106, 0, 150, 313),     # Triple 6 (right)
+            (101, -33, 173, 348),   # Triple 10
+            (87, -62, 206, 388),    # Triple 15
+            (62, -87, 238, 427),    # Triple 2
+            (33, -101, 278, 459),   # Triple 17
+            (0, -106, 316, 488),    # Triple 3 (bottom)
+            (-33, -101, 356, 498),  # Triple 19
+            (-62, -87, 395, 500),   # Triple 7
+            (-87, -62, 432, 472),   # Triple 16
+            (-101, -33, 462, 421),  # Triple 8
+            (-106, 0, 488, 352),    # Triple 11 (left)
+            (-101, 33, 497, 274),   # Triple 14
+            (-87, 62, 486, 208),    # Triple 9
+            (-62, 87, 453, 167),    # Triple 12
+            (-33, 101, 395, 144),   # Triple 5
+        ]
+        
+        # Add segment points to calibration
+        for point in segment_calibration_points:
+            board_x, board_y, cam1_pixel_x, cam2_pixel_x = point
+            if cam1_pixel_x is not None and cam2_pixel_x is not None:
+                self.calibration_points[(board_x, board_y)] = (cam1_pixel_x, cam2_pixel_x)
+        
+        # Create mapping tables for interpolation
+        self.cam1_pixel_to_board_mapping = []
+        self.cam2_pixel_to_board_mapping = []
+        
+        # Fill the mapping tables
+        for (board_x, board_y), (cam1_pixel_x, cam2_pixel_x) in self.calibration_points.items():
+            # We only need x mapping for camera 1
+            self.cam1_pixel_to_board_mapping.append((cam1_pixel_x, board_x))
+            # We only need y mapping for camera 2
+            self.cam2_pixel_to_board_mapping.append((cam2_pixel_x, board_y))
+        
+        # Sort the mappings by pixel values for efficient lookup
+        self.cam1_pixel_to_board_mapping.sort(key=lambda x: x[0])
+        self.cam2_pixel_to_board_mapping.sort(key=lambda x: x[0])
+        
+        # Background subtractors with optimized parameters
+        self.bg_subtractor1 = cv2.createBackgroundSubtractorMOG2(
+            history=3000,        # Longer history for more stable background
+            varThreshold=60,     # Slightly reduced threshold for better detection
+            detectShadows=False
+        )
+        self.bg_subtractor2 = cv2.createBackgroundSubtractorMOG2(
+            history=3000,
+            varThreshold=60,
+            detectShadows=False
+        )
+        
+        # Board information
+        self.board_extent = 171
+        self.board_radius = 170
+        
+        # Detection vectors
+        self.cam1_vector = None
+        self.cam2_vector = None
+        self.final_tip = None
+        
+        # Enhanced detection history for better smoothing
+        self.detection_history = {
+            'cam1': deque(maxlen=5),  # Increased history size
+            'cam2': deque(maxlen=5),
+            'final': deque(maxlen=5)
+        }
+        
+        # Kalman filter for smooth tracking
+        self.kalman = cv2.KalmanFilter(4, 2)  # 4 state variables (x, y, dx, dy), 2 measurements (x, y)
+        self.kalman.transitionMatrix = np.array([
+            [1, 0, 1, 0],
+            [0, 1, 0, 1],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ], np.float32)
+        self.kalman.measurementMatrix = np.array([
+            [1, 0, 0, 0],
+            [0, 1, 0, 0]
+        ], np.float32)
+        self.kalman.processNoiseCov = np.array([
+            [1e-4, 0, 0, 0],
+            [0, 1e-4, 0, 0],
+            [0, 0, 1e-2, 0],
+            [0, 0, 0, 1e-2]
+        ], np.float32)
+        self.kalman.measurementNoiseCov = np.array([
+            [1e-1, 0],
+            [0, 1e-1]
+        ], np.float32)
+        self.kalman_initialized = False
+        
+        # Board segments for scoring
+        self.board_segments = {
+            20: (0, 169),
+            1: (52, 161),
+            18: (98, 139),
+            4: (139, 98),
+            13: (161, 52),
+            6: (169, 0),
+            10: (161, -52),
+            15: (139, -98),
+            2: (98, -139),
+            17: (52, -161),
+            3: (0, -169),
+            19: (-52, -161),
+            7: (-98, -139),
+            16: (-139, -98),
+            8: (-161, -52),
+            11: (-169, 0),
+            14: (-161, 52),
+            9: (-139, 98),
+            12: (-98, 139),
+            5: (-52, 161)
+        }
+        
+        # Load dartboard image
+        self.board_image = cv2.imread("winmau-blade-6-triple-core-carbon-professional-bristle-dartboard.jpg")
+        if self.board_image is None:
+            print("Warning: dartboard image not found. Using placeholder.")
+            self.board_image = np.zeros((500, 500, 3), dtype=np.uint8)
+            # Draw a simple dartboard representation
+            cv2.circle(self.board_image, (250, 250), 250, (0, 0, 128), -1)
+            cv2.circle(self.board_image, (250, 250), 200, (0, 128, 128), -1)
+            cv2.circle(self.board_image, (250, 250), 170, (0, 0, 128), 3)  # Double ring
+            cv2.circle(self.board_image, (250, 250), 107, (0, 0, 128), 3)  # Triple ring
+            cv2.circle(self.board_image, (250, 250), 32, (0, 128, 128), -1)  # Outer bull
+            cv2.circle(self.board_image, (250, 250), 13, (0, 0, 128), -1)  # Inner bull
+        
+        # State tracking
+        self.calibration_mode = False
+        self.calibration_point = None
+        
+        # Sub-pixel refinement settings
+        self.subpixel_window = (5, 5)
+        self.subpixel_iterations = 30
+        self.subpixel_epsilon = 0.001
+        
+        # Filtering parameters for 1mm accuracy
+        self.movement_threshold = 1.0  # mm - threshold for stable detection
+        self.stable_position_count = 0  # counter for stable positions
+        self.last_stable_position = None  # last stable position
+        
+        # Advanced interpolation
+        self.use_advanced_interpolation = True  # Enable advanced interpolation
+        
+        # Performance tracking
+        self.frame_count = 0
+        self.last_fps_time = time.time()
+        self.fps = 0
+    
+    def load_calibration(self, filename="dart_calibration.json"):
+        """Load calibration from file"""
+        try:
+            import json
+            import ast
+            with open(filename, "r") as f:
+                loaded_points = json.load(f)
+                self.calibration_points = {ast.literal_eval(k): v for k, v in loaded_points.items()}
+            
+            # Rebuild mapping tables
+            self.cam1_pixel_to_board_mapping = []
+            self.cam2_pixel_to_board_mapping = []
+            for (board_x, board_y), (cam1_pixel_x, cam2_pixel_x) in self.calibration_points.items():
+                self.cam1_pixel_to_board_mapping.append((cam1_pixel_x, board_x))
+                self.cam2_pixel_to_board_mapping.append((cam2_pixel_x, board_y))
+            self.cam1_pixel_to_board_mapping.sort(key=lambda x: x[0])
+            self.cam2_pixel_to_board_mapping.sort(key=lambda x: x[0])
+            
+            print(f"Loaded {len(self.calibration_points)} calibration points")
+            return True
+        except Exception as e:
+            print(f"Error loading calibration: {e}")
+            return False
+    
+    def save_calibration(self, filename="dart_calibration.json"):
+        """Save calibration to file"""
+        try:
+            with open(filename, "w") as f:
+                json.dump({str(k): v for k, v in self.calibration_points.items()}, f)
+            print(f"Saved {len(self.calibration_points)} calibration points")
+            return True
+        except Exception as e:
+            print(f"Error saving calibration: {e}")
+            return False
+    
+    def interpolate_value(self, pixel_value, mapping_table):
+        """
+        Interpolate a value using the provided mapping table.
+        mapping_table is a list of (pixel_value, board_coordinate) pairs sorted by pixel_value.
+        """
+        # Handle edge cases
+        if not mapping_table:
+            return None
+        
+        # If pixel value is outside the range of our mapping, use the nearest edge value
+        if pixel_value <= mapping_table[0][0]:
+            return mapping_table[0][1]
+        if pixel_value >= mapping_table[-1][0]:
+            return mapping_table[-1][1]
+        
+        # Find position where pixel_value would be inserted to maintain sorted order
+        pos = bisect_left([x[0] for x in mapping_table], pixel_value)
+        
+        # If exact match
+        if pos < len(mapping_table) and mapping_table[pos][0] == pixel_value:
+            return mapping_table[pos][1]
+        
+        # Need to interpolate between pos-1 and pos
+        lower_pixel, lower_value = mapping_table[pos-1]
+        upper_pixel, upper_value = mapping_table[pos]
+        
+        # Linear interpolation
+        ratio = (pixel_value - lower_pixel) / (upper_pixel - lower_pixel)
+        interpolated_value = lower_value + ratio * (upper_value - lower_value)
+        
+        return interpolated_value
+    
+    def advanced_interpolation(self, cam1_pixel_x, cam2_pixel_x):
+        """
+        Advanced interpolation using nearby calibration points for better accuracy
+        """
+        # Find nearby calibration points in pixel space
+        nearby_points = []
+        for (board_x, board_y), (cal_cam1_px, cal_cam2_px) in self.calibration_points.items():
+            # Calculate weighted distance in pixel space
+            dx = (cam1_pixel_x - cal_cam1_px)
+            dy = (cam2_pixel_x - cal_cam2_px)
+            distance = math.sqrt(dx*dx + dy*dy)
+            
+            # Add points within reasonable distance
+            if distance < 100:  # Within 100 pixels
+                nearby_points.append(((board_x, board_y), distance))
+        
+        # If we have enough nearby points
+        if len(nearby_points) >= 3:
+            # Sort by distance
+            nearby_points.sort(key=lambda x: x[1])
+            
+            # Use inverse distance weighting with power parameter for interpolation
+            power = 2  # IDW power parameter
+            total_weight = 0
+            weighted_x = 0
+            weighted_y = 0
+            
+            for (board_x, board_y), distance in nearby_points[:5]:  # Use closest 5 points
+                # Add small constant to avoid division by zero
+                weight = 1.0 / (distance + 0.1) ** power
+                total_weight += weight
+                
+                weighted_x += board_x * weight
+                weighted_y += board_y * weight
+            
+            # Normalize
+            if total_weight > 0:
+                return weighted_x / total_weight, weighted_y / total_weight
+        
+        # Fallback to standard interpolation if advanced method fails
+        return (
+            self.interpolate_value(cam1_pixel_x, self.cam1_pixel_to_board_mapping),
+            self.interpolate_value(cam2_pixel_x, self.cam2_pixel_to_board_mapping)
+        )
+    
+    def apply_smoothing(self, new_value, history_key):
+        """
+        Apply smoothing to the detection using weighted moving average
+        """
+        if new_value is None:
+            return None
+        
+        # Add new value to history
+        self.detection_history[history_key].append(new_value)
+        
+        # If we have enough history, compute weighted average
+        if len(self.detection_history[history_key]) >= 2:
+            # More recent values have higher weight
+            total_weight = 0
+            weighted_sum = 0
+            
+            # For final position (x,y tuple)
+            if history_key == 'final':
+                weighted_x = 0
+                weighted_y = 0
+                
+                # Calculate weights based on recency
+                weights = [i+1 for i in range(len(self.detection_history[history_key]))]
+                total_weight = sum(weights)
+                
+                for i, (x, y) in enumerate(self.detection_history[history_key]):
+                    weight = weights[i]
+                    weighted_x += x * weight
+                    weighted_y += y * weight
+                
+                return (weighted_x / total_weight, weighted_y / total_weight)
+            else:
+                # For single values (cam1/cam2)
+                weights = [i+1 for i in range(len(self.detection_history[history_key]))]
+                total_weight = sum(weights)
+                
+                for i, value in enumerate(self.detection_history[history_key]):
+                    weight = weights[i]
+                    weighted_sum += value * weight
+                
+                return weighted_sum / total_weight
+        
+        return new_value
+    
+    def update_kalman(self, position):
+        """Update Kalman filter with new position measurement"""
+        if position is None:
+            return
+        
+        measurement = np.array([[position[0]], [position[1]]], np.float32)
+        
+        if not self.kalman_initialized:
+            # Initialize Kalman filter with first measurement
+            self.kalman.statePre = np.array([[position[0]], [position[1]], [0], [0]], np.float32)
+            self.kalman.statePost = np.array([[position[0]], [position[1]], [0], [0]], np.float32)
+            self.kalman_initialized = True
+            return position
+        
+        # Prediction step
+        prediction = self.kalman.predict()
+        
+        # Correction step
+        corrected = self.kalman.correct(measurement)
+        
+        # Return corrected state (x, y)
+        return (corrected[0, 0], corrected[1, 0])
+    
+    def detect_point_with_subpixel(self, contour, roi_center_y):
+        """
+        Detect dart with subpixel accuracy
+        
+        Args:
+            contour: Detected contour
+            roi_center_y: Y-coordinate of ROI center line
+            
+        Returns:
+            x: X-coordinate with subpixel accuracy
+        """
+        if cv2.contourArea(contour) < 5:
+            return None
+        
+        # Get basic bounding box
+        x, y, w, h = cv2.boundingRect(contour)
+        center_x = x + w / 2
+        
+        # Use moments for more accurate center
+        M = cv2.moments(contour)
+        if M["m00"] > 0:
+            center_x = M["m10"] / M["m00"]
+        
+        # Further refine with subpixel corner detection if the contour is big enough
+        if cv2.contourArea(contour) > 10:
+            # Extract points along the contour
+            contour_points = contour.reshape(-1, 2).astype(np.float32)
+            
+            # Apply subpixel refinement
+            refined_points = cv2.cornerSubPix(
+                cv2.cvtColor(np.zeros((480, 640), np.uint8), cv2.COLOR_GRAY2BGR),
+                contour_points,
+                self.subpixel_window,
+                (-1, -1),
+                (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 
+                 self.subpixel_iterations, 
+                 self.subpixel_epsilon)
+            )
+            
+            # Calculate refined center
+            refined_x = np.mean(refined_points[:, 0])
+            # Use refined x if it's reasonably close to the original
+            if abs(refined_x - center_x) < w:
+                center_x = refined_x
+        
+        return center_x
+    
+    def process_camera1_frame(self, frame):
+        """Process camera 1 frame with enhanced detection"""
+        # Rotate frame 180 degrees as in original code
+        frame_rot = cv2.rotate(frame, cv2.ROTATE_180)
+        
+        # Extract ROI
+        roi = frame_rot[self.cam1_roi_top:self.cam1_roi_bottom, :]
+        
+        # Convert to grayscale
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        
+        # Apply Gaussian blur to reduce noise
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        
+        # Apply background subtraction
+        fg_mask = self.bg_subtractor1.apply(blurred)
+        
+        # Threshold and clean up mask
+        _, fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)
+        
+        # Morphological operations to improve mask
+        kernel = np.ones((3, 3), np.uint8)
+        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        
+        # Find contours
+        contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Sort contours by area (largest first)
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)
+        
+        dart_pixel_x = None
+        best_contour = None
+        
+        # Draw a tracking line at the board plane y-value
+        roi_center_y = self.cam1_board_plane_y - self.cam1_roi_top
+        cv2.line(roi, (0, roi_center_y), (roi.shape[1], roi_center_y), (0, 255, 255), 1)
+        
+        # Process contours
+        for contour in contours:
+            if cv2.contourArea(contour) > 5:
+                # Use enhanced subpixel detection
+                dart_pixel_x = self.detect_point_with_subpixel(contour, roi_center_y)
+                if dart_pixel_x is not None:
+                    best_contour = contour
+                    break
+        
+        # If dart detected
+        if dart_pixel_x is not None:
+            # Highlight the detected point
+            cv2.circle(roi, (int(dart_pixel_x), roi_center_y), 5, (0, 255, 0), -1)
+            cv2.putText(roi, f"Px: {dart_pixel_x:.2f}", (int(dart_pixel_x) + 5, roi_center_y - 5),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+            
+            # Draw the contour
+            cv2.drawContours(roi, [best_contour], 0, (0, 255, 0), 2)
+            
+            # In calibration mode, display the pixel values
+            if self.calibration_mode and self.calibration_point:
+                print(f"Cam1 pixel for {self.calibration_point}: {dart_pixel_x:.2f}")
+            
+            # Get board x-coordinate using interpolation
+            if self.use_advanced_interpolation:
+                board_x = None  # Will be determined in the final step with both camera values
+            else:
+                # Use standard interpolation
+                board_x = self.interpolate_value(dart_pixel_x, self.cam1_pixel_to_board_mapping)
+                
+                # Apply smoothing
+                board_x = self.apply_smoothing(board_x, 'cam1')
+                
+                # Store vector info
+                self.cam1_vector = (board_x, 0)
+                
+                # Display board coordinates
+                cv2.putText(roi, f"Board X: {board_x:.1f}mm", (10, 20),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+        else:
+            self.cam1_vector = None
+        
+        # Copy ROI back to rotated frame
+        frame_rot[self.cam1_roi_top:self.cam1_roi_bottom, :] = roi
+        
+        return frame_rot, fg_mask, dart_pixel_x
+    
+    def process_camera2_frame(self, frame):
+        """Process camera 2 frame with enhanced detection"""
+        # Rotate frame 180 degrees as in original code
+        frame_rot = cv2.rotate(frame, cv2.ROTATE_180)
+        
+        # Extract ROI
+        roi = frame_rot[self.cam2_roi_top:self.cam2_roi_bottom, :]
+        
+        # Convert to grayscale
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        
+        # Apply Gaussian blur to reduce noise
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        
+        # Apply background subtraction
+        fg_mask = self.bg_subtractor2.apply(blurred)
+        
+        # Threshold and clean up mask
+        _, fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)
+        
+        # Morphological operations to improve mask
+        kernel = np.ones((3, 3), np.uint8)
+        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        
+        # Find contours
+        contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Sort contours by area (largest first)
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)
+        
+        dart_pixel_x = None
+        best_contour = None
+        
+        # Draw a tracking line at the board plane y-value
+        roi_center_y = self.cam2_board_plane_y - self.cam2_roi_top
+        cv2.line(roi, (0, roi_center_y), (roi.shape[1], roi_center_y), (0, 255, 255), 1)
+        
+        # Process contours
+        for contour in contours:
+            if cv2.contourArea(contour) > 5:
+                # Use enhanced subpixel detection
+                dart_pixel_x = self.detect_point_with_subpixel(contour, roi_center_y)
+                if dart_pixel_x is not None:
+                    best_contour = contour
+                    break
+        
+        # If dart detected
+        if dart_pixel_x is not None:
+            # Highlight the detected point
+            cv2.circle(roi, (int(dart_pixel_x), roi_center_y), 5, (0, 255, 0), -1)
+            cv2.putText(roi, f"Px: {dart_pixel_x:.2f}", (int(dart_pixel_x) + 5, roi_center_y - 5),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+            
+            # Draw the contour
+            cv2.drawContours(roi, [best_contour], 0, (0, 255, 0), 2)
+            
+            # In calibration mode, display the pixel values
+            if self.calibration_mode and self.calibration_point:
+                print(f"Cam2 pixel for {self.calibration_point}: {dart_pixel_x:.2f}")
+            
+            # Get board y-coordinate using interpolation
+            if self.use_advanced_interpolation:
+                board_y = None  # Will be determined in the final step with both camera values
+            else:
+                # Use standard interpolation
+                board_y = self.interpolate_value(dart_pixel_x, self.cam2_pixel_to_board_mapping)
+                
+                # Apply smoothing
+                board_y = self.apply_smoothing(board_y, 'cam2')
+                
+                # Store vector info
+                self.cam2_vector = (0, board_y)
+                
+                # Display board coordinates
+                cv2.putText(roi, f"Board Y: {board_y:.1f}mm", (10, 20),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+        else:
+            self.cam2_vector = None
+        
+       
 # Copy ROI back to rotated frame
         frame_rot[self.cam2_roi_top:self.cam2_roi_bottom, :] = roi
         
