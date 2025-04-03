@@ -577,6 +577,37 @@ class LidarCameraVisualizer:
                                 'Score'])
         
         print(f"CSV logging initialized: {self.csv_filename}")
+ def is_new_dart(self, candidate, threshold=10.0):
+	    """
+	    Check if the candidate dart position is sufficiently far from any already locked dart.
+	    
+	    Args:
+	        candidate (tuple): (x, y) position of the candidate dart.
+	        threshold (float): Minimum distance in mm to consider it a new dart.
+	        
+	    Returns:
+	        bool: True if candidate is not close to any locked dart, False otherwise.
+	    """
+	    for locked in self.locked_darts:
+	        if np.linalg.norm(np.array(candidate) - np.array(locked)) < threshold:
+	            return False
+	    return True
+
+ def reset_for_new_dart(self):
+	    """
+	    Check if enough time has passed since the last locked dart so that the system can
+	    reset to detect a new dart.
+	    
+	    Returns:
+	        bool: True if a new dart detection should start.
+	    """
+	    # Only reset if a dart is currently locked and we have a lock time recorded.
+	    if self.dart_locked and hasattr(self, 'last_lock_time'):
+	        # Reset after 3 seconds (adjust as needed)
+	        if time.time() - self.last_lock_time >= 3:
+	            return True
+	    return False
+
 
     def log_dart_data(self, final_tip_position, tip_pixel, side_lean_angle, up_down_lean_angle):
         """Log dart data to CSV file."""
@@ -1462,7 +1493,7 @@ class LidarCameraVisualizer:
             )
 
     def update_plot(self, frame):
-	    # Process LIDAR 1 data
+	    # --- Process LIDAR 1 Data ---
 	    lidar1_points_x = []
 	    lidar1_points_y = []
 	    while not self.lidar1_queue.empty():
@@ -1475,8 +1506,8 @@ class LidarCameraVisualizer:
 	                lidar1_points_x.append(x)
 	                lidar1_points_y.append(y)
 	                self.lidar1_recent_points.append((x, y))
-	                
-	    # Process LIDAR 2 data
+	    
+	    # --- Process LIDAR 2 Data ---
 	    lidar2_points_x = []
 	    lidar2_points_y = []
 	    while not self.lidar2_queue.empty():
@@ -1489,16 +1520,16 @@ class LidarCameraVisualizer:
 	                lidar2_points_x.append(x)
 	                lidar2_points_y.append(y)
 	                self.lidar2_recent_points.append((x, y))
-	                
+	    
 	    # Keep only the most recent points for smoothing
 	    self.lidar1_recent_points = self.lidar1_recent_points[-self.max_recent_points:]
 	    self.lidar2_recent_points = self.lidar2_recent_points[-self.max_recent_points:]
 	    
-	    # Get camera data
+	    # --- Get Camera Data ---
 	    camera_y = self.camera_data["dart_mm_y"]
 	    side_lean_angle = self.camera_data["dart_angle"]
 	    
-	    # Calculate up/down lean if both LIDARs have data
+	    # Calculate up/down lean if both LIDARs have recent points
 	    up_down_lean_angle = 0
 	    lean_confidence = 0
 	    if len(self.lidar1_recent_points) > 0 and len(self.lidar2_recent_points) > 0:
@@ -1506,13 +1537,13 @@ class LidarCameraVisualizer:
 	        lidar2_point = self.lidar2_recent_points[-1]
 	        up_down_lean_angle, lean_confidence = self.detect_up_down_lean(lidar1_point, lidar2_point)
 	    
-	    # Update lean visualization
+	    # --- Update Lean Visualization ---
 	    self.update_lean_visualization(side_lean_angle, up_down_lean_angle, lean_confidence)
 	    
-	    # Find camera board intersection (used only for lean detection)
+	    # --- Determine Camera Intersection Point ---
 	    camera_point = self.find_camera_board_intersection(camera_y)
 	    
-	    # Project LIDAR points with 3D lean correction
+	    # --- Project LIDAR Points with 3D Lean Correction ---
 	    lidar1_projected = None
 	    lidar2_projected = None
 	    if len(self.lidar1_recent_points) > 0:
@@ -1524,42 +1555,44 @@ class LidarCameraVisualizer:
 	        lidar2_projected = self.project_lidar_point_with_3d_lean(
 	            lidar2_point, self.lidar2_height, side_lean_angle, up_down_lean_angle, camera_y)
 	    
-	    # Compute tentative final tip position using LIDAR projections
+	    # --- Dart Locking Logic ---
+	    # Compute a tentative dart tip position based on current data
 	    tentative_tip = self.calculate_final_tip_position(camera_point, lidar1_projected, lidar2_projected)
 	    
-	    # --- Dart Locking Logic ---
 	    if tentative_tip is not None:
 	        if self.current_locked_tip is None:
-	            # First detection candidate
+	            # First candidate for locking
 	            self.current_locked_tip = tentative_tip
 	            self.lock_counter = 1
 	        else:
-	            # Check stability: how close is the new detection to the current candidate?
+	            # Check stability: compare new detection to current candidate
 	            delta = np.linalg.norm(np.array(tentative_tip) - np.array(self.current_locked_tip))
 	            if delta < self.stability_threshold:
 	                self.lock_counter += 1
 	            else:
-	                # Not stable – reset the candidate
+	                # Candidate changed significantly; reset counter
 	                self.current_locked_tip = tentative_tip
 	                self.lock_counter = 1
 	        
-	        # Lock in the dart if the candidate has been stable for enough frames
-	        if self.lock_counter >= self.frames_to_lock and not self.dart_locked:
+	        # Lock the dart if it has been stable for enough frames and it's a new dart
+	        if (self.lock_counter >= self.frames_to_lock and not self.dart_locked and 
+	            self.is_new_dart(self.current_locked_tip)):
 	            self.dart_locked = True
 	            self.locked_darts.append(self.current_locked_tip)
+	            self.last_lock_time = time.time()  # Record the time of locking
 	            self.log_dart_data(self.current_locked_tip,
 	                               self.camera_data["tip_pixel"],
 	                               side_lean_angle, up_down_lean_angle)
 	            print(f"Dart locked at: {self.current_locked_tip}")
 	    
-	    # Use the locked dart if available; otherwise, use the tentative detection
+	    # Choose the final tip position: if a dart is locked, keep using its position
 	    if self.dart_locked:
 	        final_tip_position = self.current_locked_tip
 	    else:
 	        final_tip_position = tentative_tip
 	    # --- End Dart Locking Logic ---
 	    
-	    # Apply segment-specific coefficients and calibration corrections if we have a final tip
+	    # --- Apply Segment Coefficients and Calibration ---
 	    if final_tip_position is not None:
 	        x, y = final_tip_position
 	        x, y = self.apply_segment_coefficients(x, y)
@@ -1571,7 +1604,7 @@ class LidarCameraVisualizer:
 	    self.scatter2.set_data(lidar2_points_x, lidar2_points_y)
 	    
 	    if camera_point is not None:
-	        board_x = 0  # Board's X coordinate is assumed 0
+	        board_x = 0  # Assume board's X coordinate is 0
 	        dir_x = board_x - self.camera_position[0]
 	        dir_y = camera_point[1] - self.camera_position[1]
 	        vector_length = np.sqrt(dir_x**2 + dir_y**2)
@@ -1618,9 +1651,7 @@ class LidarCameraVisualizer:
 	    self.lean_text.set_text(lean_text)
 	    # --- End Update Plot Elements ---
 	    
-	    # Optionally check for a reset trigger for the next dart.
-	    # (This function should return True when you want to start a new detection,
-	    #  e.g. via manual input or a timeout.)
+	    # --- Reset for Next Dart ---
 	    if self.reset_for_new_dart():
 	        self.dart_locked = False
 	        self.current_locked_tip = None
