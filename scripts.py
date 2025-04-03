@@ -22,8 +22,8 @@ class LidarCameraVisualizer:
         self.lidar2_pos = (204.0, 223.5)   # Adjusted based on calibration
 
         # LIDAR configurations - refined based on calibration data
-        self.lidar1_rotation = 342.5        # Adjusted angle
-        self.lidar2_rotation = 186.25       # Adjusted angle
+        self.lidar1_rotation = 342        # Adjusted angle
+        self.lidar2_rotation = 187.25       # Adjusted angle
         self.lidar1_mirror = True
         self.lidar2_mirror = True
         self.lidar1_offset = 4.5            # Adjusted offset
@@ -39,11 +39,11 @@ class LidarCameraVisualizer:
         self.camera_data = {"dart_mm_y": None, "dart_angle": None, "tip_pixel": None}  # Now tracking tip pixel too
 
         # ROI Settings for side camera (similar to camera2 in the dual setup)
-        self.camera_board_plane_y = 250  # The y-coordinate where the board surface is
-        self.camera_roi_range = 30       # How much above and below to include
+        self.camera_board_plane_y = 228  # The y-coordinate where the board surface is
+        self.camera_roi_range = 15      # How much above and below to include
         self.camera_roi_top = self.camera_board_plane_y - self.camera_roi_range
         self.camera_roi_bottom = self.camera_board_plane_y + self.camera_roi_range
-        self.camera_roi_left = 119   # Example left boundary
+        self.camera_roi_left = 117   # Example left boundary
         self.camera_roi_right = 604  # Example right boundary
         
         # Add calibration point system
@@ -55,12 +55,12 @@ class LidarCameraVisualizer:
         # Detection persistence to maintain visibility
         self.last_valid_detection = {"dart_mm_y": None, "dart_angle": None, "tip_pixel": None}
         self.detection_persistence_counter = 0
-        self.detection_persistence_frames = 30
+        self.detection_persistence_frames = 5000
 
         # Camera background subtractor with improved settings from second script
         self.camera_bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history=162,
-            varThreshold=67,
+            history=50,
+            varThreshold=70,
             detectShadows=False
         )
         
@@ -68,8 +68,8 @@ class LidarCameraVisualizer:
         self.prev_gray = None
         
         # Frame differencing threshold from second script
-        self.diff_threshold = 25
-        self.min_contour_area = 30
+        self.diff_threshold = 67
+        self.min_contour_area = 67
 
         # LIDAR queues
         self.lidar1_queue = Queue()
@@ -78,7 +78,7 @@ class LidarCameraVisualizer:
         # Storage for most recent LIDAR data points
         self.lidar1_recent_points = []
         self.lidar2_recent_points = []
-        self.max_recent_points = 20  # Keep last 20 points for smoothing
+        self.max_recent_points = 50  # Keep last 20 points for smoothing
 
         # Store the projected LIDAR points (after lean compensation)
         self.lidar1_projected_point = None
@@ -86,6 +86,16 @@ class LidarCameraVisualizer:
         
         # Intersection point of camera vector with board plane
         self.camera_board_intersection = None
+
+	# In __init__ (for example)
+	self.dart_locked = False
+	self.current_locked_tip = None
+	self.lock_counter = 0
+	self.frames_to_lock = 10         # Number of consecutive frames needed to lock a dart
+	self.stability_threshold = 5.0   # Tolerance in mm to consider the tip position stable
+	if not hasattr(self, 'locked_darts'):
+	    self.locked_darts = []
+
 
         # CSV logging initialization
         self.initialize_csv_logging()
@@ -398,7 +408,104 @@ class LidarCameraVisualizer:
 
         # Signal handling
         signal.signal(signal.SIGINT, self.signal_handler)
-
+	    
+    def load_standard_calibration_points(self):
+	    """Load standard set of calibration points mapping pixel X to mm Y."""
+	    # Clear existing calibration points
+	    self.clear_calibration_points()
+	    
+	    calibration_points = [
+	        (142, 174),    # 20 OC
+	        (552, -174),   # 3 OC
+	        (412, 0),      # 11 OC
+	        (340, 0),      # 6 OC
+	        (172, 260),    # 20 TSTR
+	        (220, 107),    # 20 TSBL
+	        (243, 97),     # 20 TBR
+	        (335, 15),     # 20 BSBC
+	        (205, 143),    # 1 TSTR
+	        (231, 105),    # 1 TSBL
+	        (258, 88),     # 1 TBR
+	        (337, 14),     # 1 BSBC
+	        (243, 113),    # 18 TSTR
+	        (248, 94),     # 18 TSBL
+	        (276, 69),     # 18 TBR
+	        (338, 13),     # 18 BSBC
+	        (282, 73),     # 4 TSTR
+	        (274, 76),     # 4 TSBL
+	        (301, 46),     # 4 TBR
+	        (343, 11),     # 4 BSBC
+	        (318, 27),     # 13 TSTR
+	        (302, 47),     # 13 TSBL
+	        (330, 19),     # 13 TBR
+	        (348, 3),      # 13 BSBC
+	        (358, -23),    # 6 TSTR
+	        (330, 15),     # 6 TSBL
+	        (357, -14),    # 6 TBR
+	        (353, 0),      # 6 BSBC
+	        (398, -71),    # 10 TSTR
+	        (361, -19),    # 10 TSBL
+	        (384, -44),    # 10 TBR
+	        (359, -5),     # 10 BSBC
+	        (435, -113),   # 15 TSTR
+	        (392, -50),    # 15 TSBL
+	        (412, -67),    # 15 TBR
+	        (366, -11),    # 15 BSBC
+	        (478, -140),   # 2 TSTR
+	        (420, -78),    # 2 TSBL
+	        (438, -85),    # 2 TBR
+	        (370, -14),    # 2 BSBC
+	        (515, -158),   # 17 TSTR
+	        (446, -97),    # 17 TSBL
+	        (459, -97),    # 17 TBR
+	        (374, -16),    # 17 BSBC
+	        (549, -157),   # 3 TSTR
+	        (470, -108),   # 3 TSBL
+	        (474, -97),    # 3 TBR
+	        (378, -17),    # 3 BSBC
+	        (574, -142),   # 19 TSTR
+	        (487, -107),   # 19 TSBL
+	        (481, -90),    # 19 TBR
+	        (377, -17),    # 19 BSBC
+	        (574, -115),   # 7 TSTR
+	        (493, -96),    # 7 TSBL
+	        (472, -69),    # 7 TBR
+	        (375, -14),    # 7 BSBC
+	        (540, -74),    # 16 TSTR
+	        (485, -75),    # 16 TSBL
+	        (446, -45),    # 16 TBR
+	        (371, -11),    # 16 BSBC
+	        (458, -27),    # 8 TSTR
+	        (454, -47),    # 8 TSBL
+	        (403, -17),    # 8 TBR
+	        (366, -5),     # 8 BSBC
+	        (347, 23),     # 11 TSTR
+	        (405, -24),    # 11 TSBL
+	        (352, 14),     # 11 TBR
+	        (359, 0),      # 11 BSBC
+	        (241, 71),     # 14 TSTR
+	        (347, 19),     # 14 TSBL
+	        (303, 45),     # 14 TBR
+	        (352, 6),      # 14 BSBC
+	        (171, 112),    # 9 TSTR
+	        (293, 51),     # 9 TSBL
+	        (347, 69),     # 9 TBR
+	        (345, 12),     # 9 BSBC
+	        (144, 142),    # 12 TSTR
+	        (246, 77),     # 12 TSBL
+	        (240, 85),     # 12 TBR
+	        (342, 13),     # 12 BSBC
+	        (147, 158),    # 5 TSTR
+	        (224, 95),     # 5 TSBL
+	        (234, 108),    # 5 TBR
+	        (336, 19)      # 5 BSBC
+	    ]
+	    
+	    # Add all the calibration points
+	    for pixel_x, mm_y in calibration_points:
+	        self.add_calibration_point(pixel_x, mm_y)
+	    
+	    print(f"Loaded {len(calibration_points)} standard calibration points")	
     def xy_to_dartboard_score(self, x, y):
         """
         Convert x,y coordinates to dartboard score.
@@ -613,7 +720,7 @@ class LidarCameraVisualizer:
             tip_point: Detected tip coordinates (x,y)
             
         Returns:
-            angle: Angle in degrees (90Ã‚Â° = vertical) or None if angle couldn't be calculated
+            angle: Angle in degrees (90ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â° = vertical) or None if angle couldn't be calculated
         """
         if tip_point is None:
             return None
@@ -974,7 +1081,7 @@ class LidarCameraVisualizer:
         if dist <= self.radii["outer_bull"]:
             return x, y
 
-        # Determine segment number from angle (using offset of 9Ã‚Â° as before)
+        # Determine segment number from angle (using offset of 9ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â° as before)
         # We recalculate after applying the radial offset
         angle_deg = math.degrees(math.atan2(y, x))
         if angle_deg < 0:
@@ -1035,7 +1142,7 @@ class LidarCameraVisualizer:
             lidar2_point: (x, y) position from LIDAR 2
             
         Returns:
-            lean_angle: Estimated lean angle in degrees (0Ã‚Â° = vertical, positive = up, negative = down)
+            lean_angle: Estimated lean angle in degrees (0ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â° = vertical, positive = up, negative = down)
             confidence: Confidence level in the lean detection (0-1)
         """
         # Case 1: Both LIDARs active - use standard X-difference calculation
@@ -1108,84 +1215,84 @@ class LidarCameraVisualizer:
         lean_angle = max(-self.MAX_UP_DOWN_LEAN, min(self.MAX_UP_DOWN_LEAN, lean_angle))
         
         return lean_angle, confidence
-def project_lidar_point_with_3d_lean(self, lidar_point, lidar_height, side_lean_angle, up_down_lean_angle, camera_y):
-    """
-    Project a LIDAR detection point to account for both side-to-side and up/down lean.
-    Enhanced version with better handling of lean directions.
-    
-    Args:
-        lidar_point: (x, y) position of LIDAR detection
-        lidar_height: height of the LIDAR beam above board in mm
-        side_lean_angle: angle of dart from vertical in degrees (90° = vertical, from camera)
-        up_down_lean_angle: angle of up/down lean in degrees (0° = vertical)
-        camera_y: Y-coordinate from camera detection
+    def project_lidar_point_with_3d_lean(self, lidar_point, lidar_height, side_lean_angle, up_down_lean_angle, camera_y):
+        """
+        Project a LIDAR detection point to account for both side-to-side and up/down lean.
+        Enhanced version with better handling of lean directions.
         
-    Returns:
-        (x, y) position of the adjusted point
-    """
-    if lidar_point is None:
-        return lidar_point
+        Args:
+            lidar_point: (x, y) position of LIDAR detection
+            lidar_height: height of the LIDAR beam above board in mm
+            side_lean_angle: angle of dart from vertical in degrees (90ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â° = vertical, from camera)
+            up_down_lean_angle: angle of up/down lean in degrees (0ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â° = vertical)
+            camera_y: Y-coordinate from camera detection
+            
+        Returns:
+            (x, y) position of the adjusted point
+        """
+        if lidar_point is None:
+            return lidar_point
+            
+        # Handle missing lean angles
+        if side_lean_angle is None:
+            side_lean_angle = 90  # Default to vertical
+        if up_down_lean_angle is None:
+            up_down_lean_angle = 0  # Default to vertical
         
-    # Handle missing lean angles
-    if side_lean_angle is None:
-        side_lean_angle = 90  # Default to vertical
-    if up_down_lean_angle is None:
-        up_down_lean_angle = 0  # Default to vertical
-    
-    # Extract original coordinates
-    original_x, original_y = lidar_point
-    
-    # Apply side-to-side lean adjustment if we have camera data
-    adjusted_y = original_y
-    if camera_y is not None:
-        # Determine lean direction from angle
-        # A left lean (angle < 85) should move Y coordinate DOWN
-        # A right lean (angle > 95) should move Y coordinate UP
-        lean_direction = 0  # No lean correction by default
+        # Extract original coordinates
+        original_x, original_y = lidar_point
         
-        if side_lean_angle < 85:
-            # Left lean
-            lean_factor = (85 - side_lean_angle) / 85.0  # More horizontal = higher factor
-            lean_direction = -1  # Move downward
-        elif side_lean_angle > 95:
-            # Right lean
-            lean_factor = (side_lean_angle - 95) / 85.0  # More horizontal = higher factor
-            lean_direction = 1  # Move upward
-        else:
-            # Near vertical, little to no correction
-            lean_factor = 0
+        # Apply side-to-side lean adjustment if we have camera data
+        adjusted_y = original_y
+        if camera_y is not None:
+            # Determine lean direction from angle
+            # A left lean (angle < 85) should move Y coordinate DOWN
+            # A right lean (angle > 95) should move Y coordinate UP
+            lean_direction = 0  # No lean correction by default
+            
+            if side_lean_angle < 85:
+                # Left lean
+                lean_factor = (85 - side_lean_angle) / 85.0  # More horizontal = higher factor
+                lean_direction = -1  # Move downward
+            elif side_lean_angle > 95:
+                # Right lean
+                lean_factor = (side_lean_angle - 95) / 85.0  # More horizontal = higher factor
+                lean_direction = 1  # Move upward
+            else:
+                # Near vertical, little to no correction
+                lean_factor = 0
+            
+            # Calculate Y displacement (how far LIDAR point is from camera line)
+            y_displacement = abs(original_y - camera_y)
+            
+            # Apply side-to-side adjustment proportional to lean angle and displacement
+            MAX_SIDE_ADJUSTMENT = self.side_lean_max_adjustment  # mm
+            
+            # The further from the camera line, the greater the correction
+            side_adjustment = min(lean_factor * y_displacement, MAX_SIDE_ADJUSTMENT)
+            
+            # Apply in the appropriate direction
+            adjusted_y = original_y + (side_adjustment * lean_direction)
         
-        # Calculate Y displacement (how far LIDAR point is from camera line)
-        y_displacement = abs(original_y - camera_y)
+        # Calculate up/down adjustment
+        # This is proportional to the up/down lean angle and the distance from board center
+        # The farther from center, the more adjustment needed for the same lean angle
         
-        # Apply side-to-side adjustment proportional to lean angle and displacement
-        MAX_SIDE_ADJUSTMENT = self.side_lean_max_adjustment  # mm
+        # Distance from board center in Y direction
+        y_distance_from_center = abs(original_y)
         
-        # The further from the camera line, the greater the correction
-        side_adjustment = min(lean_factor * y_displacement, MAX_SIDE_ADJUSTMENT)
+        # Calculate up/down adjustment 
+        # Positive up_down_lean_angle means leaning upward, adjustment should be in X direction
+        MAX_UP_DOWN_ADJUSTMENT = self.up_down_lean_max_adjustment  # mm
         
-        # Apply in the appropriate direction
-        adjusted_y = original_y + (side_adjustment * lean_direction)
-    
-    # Calculate up/down adjustment
-    # This is proportional to the up/down lean angle and the distance from board center
-    # The farther from center, the more adjustment needed for the same lean angle
-    
-    # Distance from board center in Y direction
-    y_distance_from_center = abs(original_y)
-    
-    # Calculate up/down adjustment 
-    # Positive up_down_lean_angle means leaning upward, adjustment should be in X direction
-    MAX_UP_DOWN_ADJUSTMENT = self.up_down_lean_max_adjustment  # mm
-    
-    # Calculate adjustment proportional to lean angle and distance from center
-    # More lean and further from center = bigger adjustment
-    up_down_adjustment = (up_down_lean_angle / self.MAX_UP_DOWN_LEAN) * (y_distance_from_center / 170.0) * MAX_UP_DOWN_ADJUSTMENT
-    
-    # Apply up/down adjustment to X coordinate
-    adjusted_x = original_x + up_down_adjustment
-    
-    return (adjusted_x, adjusted_y)
+        # Calculate adjustment proportional to lean angle and distance from center
+        # More lean and further from center = bigger adjustment
+        up_down_adjustment = (up_down_lean_angle / self.MAX_UP_DOWN_LEAN) * (y_distance_from_center / 170.0) * MAX_UP_DOWN_ADJUSTMENT
+        
+        # Apply up/down adjustment to X coordinate
+        adjusted_x = original_x + up_down_adjustment
+        
+        return (adjusted_x, adjusted_y)
 
     def find_camera_board_intersection(self, camera_y):
         """Calculate where the camera epipolar line intersects the board surface.
@@ -1203,18 +1310,13 @@ def project_lidar_point_with_3d_lean(self, lidar_point, lidar_height, side_lean_
         # Simple case - the Y coordinate is directly from camera, X is 0 (board surface)
         # In reality, we might need a more complex projection based on camera angle
         return (0, camera_y)
-    def get_camera_intersection(self, camera_y):
-	    if camera_y is None:
-	        return None
-	    return (0, camera_y)
- 
+
     def calculate_final_tip_position(self, camera_point, lidar1_point, lidar2_point):
         """
-        Calculate the final tip position using all available data with enhanced 3D lean correction.
-        Updated for camera on the left and up/down lean instead of forward/backward.
+        Calculate the final tip position using LIDAR data only, with the camera used just for lean detection.
         
         Args:
-            camera_point: Intersection of camera vector with board
+            camera_point: Intersection of camera vector with board (used only for lean detection, not position)
             lidar1_point: Projected LIDAR 1 point
             lidar2_point: Projected LIDAR 2 point
             
@@ -1222,94 +1324,92 @@ def project_lidar_point_with_3d_lean(self, lidar_point, lidar_height, side_lean_
             (x, y) final estimated tip position
         """
         # Points that are actually available
-        valid_points = []
-        if camera_point is not None:
-            valid_points.append(camera_point)
+        valid_lidar_points = []
         if lidar1_point is not None:
-            valid_points.append(lidar1_point)
+            valid_lidar_points.append(lidar1_point)
         if lidar2_point is not None:
-            valid_points.append(lidar2_point)
+            valid_lidar_points.append(lidar2_point)
             
-        # If no valid points, can't determine position
-        if not valid_points:
+        # If no valid LIDAR points, return None - we can't determine position reliably
+        # Camera is now used only for lean detection, not for positioning
+        if not valid_lidar_points:
             return None
             
-        # If only one sensor has data, use that
-        if len(valid_points) == 1:
-            return valid_points[0]
+        # If only one LIDAR has data, use that LIDAR for positioning
+        if len(valid_lidar_points) == 1:
+            # Get the LIDAR point's original coordinates
+            x, y = valid_lidar_points[0]
             
-        # Define maximum allowed discrepancy between sensors
-        MAX_DISCREPANCY = 15.0  # mm
-        
-        # Enhanced weighting system that considers up/down lean
-        if camera_point is not None:
-            if lidar1_point is not None and lidar2_point is not None:
-                # Detect up/down lean
-                up_down_lean_angle, lean_confidence = self.detect_up_down_lean(lidar1_point, lidar2_point)
+            # Apply side lean correction if available, but keep the LIDAR y-coordinate
+            if self.camera_data["dart_angle"] is not None:
+                side_lean_angle = self.camera_data["dart_angle"]
                 
-                # Significant lean detected with good confidence
-                if abs(up_down_lean_angle) > 5 and lean_confidence > 0.7:
-                    # Direction of lean affects which LIDAR to trust more for X position
-                    if up_down_lean_angle > 0:  # Leaning upward
-                        # Give more weight to LIDAR 1 for X position
-                        lidar_x = lidar1_point[0] * 0.7 + lidar2_point[0] * 0.3
-                    else:  # Leaning downward
-                        # Give more weight to LIDAR 2 for X position
-                        lidar_x = lidar1_point[0] * 0.3 + lidar2_point[0] * 0.7
-                else:
-                    # No significant lean detected, use average of both LIDARs
-                    lidar_x = (lidar1_point[0] + lidar2_point[0]) / 2
-                    
-                # Use camera for Y position (more reliable since camera is now on the left)
-                final_x = lidar_x
-                final_y = camera_point[1]
-                
-                final_tip_position = (final_x, final_y)
-            elif lidar1_point is not None:
-                # Have camera and LIDAR 1
-                final_tip_position = (lidar1_point[0], camera_point[1])
-            elif lidar2_point is not None:
-                # Have camera and LIDAR 2
-                final_tip_position = (lidar2_point[0], camera_point[1])
-            else:
-                final_tip_position = camera_point
-        
-        # If only LIDARs are available (no camera)
-        elif lidar1_point is not None and lidar2_point is not None:
-            # Detect up/down lean to adjust weighting
-            up_down_lean_angle, lean_confidence = self.detect_up_down_lean(lidar1_point, lidar2_point)
+                # Apply lean-based Y correction if significant lean detected
+                if side_lean_angle < 85:  # Left lean
+                    # Calculate correction factor based on how much lean (more horizontal = more correction)
+                    lean_factor = (85 - side_lean_angle) / 85.0
+                    # Move Y coordinate DOWN for left lean
+                    y_correction = -lean_factor * self.side_lean_max_adjustment
+                    y += y_correction
+                elif side_lean_angle > 95:  # Right lean
+                    # Calculate correction factor based on how much lean
+                    lean_factor = (side_lean_angle - 95) / 85.0
+                    # Move Y coordinate UP for right lean
+                    y_correction = lean_factor * self.side_lean_max_adjustment
+                    y += y_correction
             
-            # If significant lean with good confidence
-            if abs(up_down_lean_angle) > 5 and lean_confidence > 0.7:
-                if up_down_lean_angle > 0:  # Leaning upward
-                    # Weight LIDAR 1 more for both X and Y
-                    weight1 = 0.7
-                    weight2 = 0.3
-                else:  # Leaning downward
-                    # Weight LIDAR 2 more for both X and Y
-                    weight1 = 0.3
-                    weight2 = 0.7
-                    
-                final_x = lidar1_point[0] * weight1 + lidar2_point[0] * weight2
-                final_y = lidar1_point[1] * weight1 + lidar2_point[1] * weight2
-            else:
-                # No significant lean, average the positions
-                final_x = (lidar1_point[0] + lidar2_point[0]) / 2
-                final_y = (lidar1_point[1] + lidar2_point[1]) / 2
-                
-            final_tip_position = (final_x, final_y)
-        else:
-            # This shouldn't happen if the earlier logic is correct
-            final_tip_position = valid_points[0]
-        
-        # Apply scale correction to final position
-        if final_tip_position is not None:
-            x, y = final_tip_position
+            # Apply scale correction
             x = x * self.x_scale_correction
             y = y * self.y_scale_correction
-            final_tip_position = (x, y)
             
-        return final_tip_position
+            return (x, y)
+        
+        # When both LIDARs have data, we can detect up/down lean and weight accordingly
+        up_down_lean_angle, lean_confidence = self.detect_up_down_lean(lidar1_point, lidar2_point)
+        
+        # Enhanced weighting system that considers up/down lean
+        if abs(up_down_lean_angle) > 5 and lean_confidence > 0.7:
+            # Direction of lean affects which LIDAR to trust more
+            if up_down_lean_angle > 0:  # Leaning upward
+                # Give more weight to LIDAR 1
+                weight1 = 0.7
+                weight2 = 0.3
+            else:  # Leaning downward
+                # Give more weight to LIDAR 2
+                weight1 = 0.3
+                weight2 = 0.7
+                
+            # Calculate weighted average of LIDAR positions
+            x = lidar1_point[0] * weight1 + lidar2_point[0] * weight2
+            y = lidar1_point[1] * weight1 + lidar2_point[1] * weight2
+        else:
+            # No significant up/down lean, use equal weighting for LIDARs
+            x = (lidar1_point[0] + lidar2_point[0]) / 2
+            y = (lidar1_point[1] + lidar2_point[1]) / 2
+            
+        # Apply additional side lean correction if available
+        if self.camera_data["dart_angle"] is not None:
+            side_lean_angle = self.camera_data["dart_angle"]
+            
+            # Apply lean-based Y correction only if significant lean detected
+            if side_lean_angle < 85:  # Left lean
+                # Calculate correction factor based on how much lean (more horizontal = more correction)
+                lean_factor = (85 - side_lean_angle) / 85.0
+                # Move Y coordinate DOWN for left lean
+                y_correction = -lean_factor * self.side_lean_max_adjustment
+                y += y_correction
+            elif side_lean_angle > 95:  # Right lean
+                # Calculate correction factor based on how much lean
+                lean_factor = (side_lean_angle - 95) / 85.0
+                # Move Y coordinate UP for right lean
+                y_correction = lean_factor * self.side_lean_max_adjustment
+                y += y_correction
+        
+        # Apply scale correction to final position
+        x = x * self.x_scale_correction
+        y = y * self.y_scale_correction
+        
+        return (x, y)
 
     def update_lean_visualization(self, side_lean_angle, up_down_lean_angle, lean_confidence):
         """Update the visualization of lean angles."""
@@ -1321,7 +1421,7 @@ def project_lidar_point_with_3d_lean(self, lidar_point, lidar_height, side_lean_
         # Calculate arrow components based on lean angles
         if side_lean_angle is not None and up_down_lean_angle is not None:
             # Convert from degrees to radians for math functions
-            side_lean_rad = np.radians(90 - side_lean_angle)  # 90Ã‚Â° is vertical
+            side_lean_rad = np.radians(90 - side_lean_angle)  # 90ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â° is vertical
             up_down_lean_rad = np.radians(up_down_lean_angle)
             
             # X component affected by both side and up/down lean
@@ -1362,209 +1462,219 @@ def project_lidar_point_with_3d_lean(self, lidar_point, lidar_height, side_lean_
             )
 
     def update_plot(self, frame):
-    """Update plot data with enhanced 3D lean correction and CSV logging."""
-    # Process LIDAR data
-    lidar1_points_x = []
-    lidar1_points_y = []
-    lidar2_points_x = []
-    lidar2_points_y = []
+	    # Process LIDAR 1 data
+	    lidar1_points_x = []
+	    lidar1_points_y = []
+	    while not self.lidar1_queue.empty():
+	        angle, distance = self.lidar1_queue.get()
+	        x, y = self.polar_to_cartesian(angle, distance, self.lidar1_pos,
+	                                       self.lidar1_rotation, self.lidar1_mirror)
+	        if x is not None and y is not None:
+	            in_range, _ = self.filter_points_by_radii(x, y)
+	            if in_range:
+	                lidar1_points_x.append(x)
+	                lidar1_points_y.append(y)
+	                self.lidar1_recent_points.append((x, y))
+	                
+	    # Process LIDAR 2 data
+	    lidar2_points_x = []
+	    lidar2_points_y = []
+	    while not self.lidar2_queue.empty():
+	        angle, distance = self.lidar2_queue.get()
+	        x, y = self.polar_to_cartesian(angle, distance, self.lidar2_pos,
+	                                       self.lidar2_rotation, self.lidar2_mirror)
+	        if x is not None and y is not None:
+	            in_range, _ = self.filter_points_by_radii(x, y)
+	            if in_range:
+	                lidar2_points_x.append(x)
+	                lidar2_points_y.append(y)
+	                self.lidar2_recent_points.append((x, y))
+	                
+	    # Keep only the most recent points for smoothing
+	    self.lidar1_recent_points = self.lidar1_recent_points[-self.max_recent_points:]
+	    self.lidar2_recent_points = self.lidar2_recent_points[-self.max_recent_points:]
+	    
+	    # Get camera data
+	    camera_y = self.camera_data["dart_mm_y"]
+	    side_lean_angle = self.camera_data["dart_angle"]
+	    
+	    # Calculate up/down lean if both LIDARs have data
+	    up_down_lean_angle = 0
+	    lean_confidence = 0
+	    if len(self.lidar1_recent_points) > 0 and len(self.lidar2_recent_points) > 0:
+	        lidar1_point = self.lidar1_recent_points[-1]
+	        lidar2_point = self.lidar2_recent_points[-1]
+	        up_down_lean_angle, lean_confidence = self.detect_up_down_lean(lidar1_point, lidar2_point)
+	    
+	    # Update lean visualization
+	    self.update_lean_visualization(side_lean_angle, up_down_lean_angle, lean_confidence)
+	    
+	    # Find camera board intersection (used only for lean detection)
+	    camera_point = self.find_camera_board_intersection(camera_y)
+	    
+	    # Project LIDAR points with 3D lean correction
+	    lidar1_projected = None
+	    lidar2_projected = None
+	    if len(self.lidar1_recent_points) > 0:
+	        lidar1_point = self.lidar1_recent_points[-1]
+	        lidar1_projected = self.project_lidar_point_with_3d_lean(
+	            lidar1_point, self.lidar1_height, side_lean_angle, up_down_lean_angle, camera_y)
+	    if len(self.lidar2_recent_points) > 0:
+	        lidar2_point = self.lidar2_recent_points[-1]
+	        lidar2_projected = self.project_lidar_point_with_3d_lean(
+	            lidar2_point, self.lidar2_height, side_lean_angle, up_down_lean_angle, camera_y)
+	    
+	    # Compute tentative final tip position using LIDAR projections
+	    tentative_tip = self.calculate_final_tip_position(camera_point, lidar1_projected, lidar2_projected)
+	    
+	    # --- Dart Locking Logic ---
+	    if tentative_tip is not None:
+	        if self.current_locked_tip is None:
+	            # First detection candidate
+	            self.current_locked_tip = tentative_tip
+	            self.lock_counter = 1
+	        else:
+	            # Check stability: how close is the new detection to the current candidate?
+	            delta = np.linalg.norm(np.array(tentative_tip) - np.array(self.current_locked_tip))
+	            if delta < self.stability_threshold:
+	                self.lock_counter += 1
+	            else:
+	                # Not stable – reset the candidate
+	                self.current_locked_tip = tentative_tip
+	                self.lock_counter = 1
+	        
+	        # Lock in the dart if the candidate has been stable for enough frames
+	        if self.lock_counter >= self.frames_to_lock and not self.dart_locked:
+	            self.dart_locked = True
+	            self.locked_darts.append(self.current_locked_tip)
+	            self.log_dart_data(self.current_locked_tip,
+	                               self.camera_data["tip_pixel"],
+	                               side_lean_angle, up_down_lean_angle)
+	            print(f"Dart locked at: {self.current_locked_tip}")
+	    
+	    # Use the locked dart if available; otherwise, use the tentative detection
+	    if self.dart_locked:
+	        final_tip_position = self.current_locked_tip
+	    else:
+	        final_tip_position = tentative_tip
+	    # --- End Dart Locking Logic ---
+	    
+	    # Apply segment-specific coefficients and calibration corrections if we have a final tip
+	    if final_tip_position is not None:
+	        x, y = final_tip_position
+	        x, y = self.apply_segment_coefficients(x, y)
+	        x, y = self.apply_calibration_correction(x, y)
+	        final_tip_position = (x, y)
+	    
+	    # --- Update Plot Elements ---
+	    self.scatter1.set_data(lidar1_points_x, lidar1_points_y)
+	    self.scatter2.set_data(lidar2_points_x, lidar2_points_y)
+	    
+	    if camera_point is not None:
+	        board_x = 0  # Board's X coordinate is assumed 0
+	        dir_x = board_x - self.camera_position[0]
+	        dir_y = camera_point[1] - self.camera_position[1]
+	        vector_length = np.sqrt(dir_x**2 + dir_y**2)
+	        if vector_length > 0:
+	            norm_dir_x = dir_x / vector_length
+	            norm_dir_y = dir_y / vector_length
+	        else:
+	            norm_dir_x, norm_dir_y = 1, 0
+	        extended_x = self.camera_position[0] + norm_dir_x * self.camera_vector_length
+	        extended_y = self.camera_position[1] + norm_dir_y * self.camera_vector_length
+	        self.camera_vector.set_data([self.camera_position[0], extended_x],
+	                                    [self.camera_position[1], extended_y])
+	        self.camera_dart.set_data([camera_point[0]], [camera_point[1]])
+	    else:
+	        self.camera_vector.set_data([], [])
+	        self.camera_dart.set_data([], [])
+	    
+	    if lidar1_projected is not None:
+	        self.lidar1_dart.set_data([lidar1_projected[0]], [lidar1_projected[1]])
+	    else:
+	        self.lidar1_dart.set_data([], [])
+	    
+	    if lidar2_projected is not None:
+	        self.lidar2_dart.set_data([lidar2_projected[0]], [lidar2_projected[1]])
+	    else:
+	        self.lidar2_dart.set_data([], [])
+	    
+	    if final_tip_position is not None:
+	        self.detected_dart.set_data([final_tip_position[0]], [final_tip_position[1]])
+	        score = self.xy_to_dartboard_score(final_tip_position[0], final_tip_position[1])
+	        if score != "Outside":
+	            description = self.get_score_description(score)
+	            if self.score_text:
+	                self.score_text.set_text(description)
+	            else:
+	                self.score_text = self.ax.text(-380, 360, description, fontsize=12, color='red')
+	    else:
+	        self.detected_dart.set_data([], [])
+	    
+	    # Update lean text display
+	    side_lean_str = f"{side_lean_angle:.1f}°" if side_lean_angle is not None else "N/A"
+	    up_down_lean_str = f"{up_down_lean_angle:.1f}°" if up_down_lean_angle is not None else "N/A"
+	    lean_text = f"Side Lean: {side_lean_str}\nUp/Down: {up_down_lean_str}"
+	    self.lean_text.set_text(lean_text)
+	    # --- End Update Plot Elements ---
+	    
+	    # Optionally check for a reset trigger for the next dart.
+	    # (This function should return True when you want to start a new detection,
+	    #  e.g. via manual input or a timeout.)
+	    if self.reset_for_new_dart():
+	        self.dart_locked = False
+	        self.current_locked_tip = None
+	        self.lock_counter = 0
+	        self.lidar1_recent_points = []
+	        self.lidar2_recent_points = []
+	        print("Ready for next dart.")
+	    
+	    # Return the updated artist list for FuncAnimation
+	    artists = [
+	        self.scatter1, self.scatter2,
+	        self.camera_vector, self.camera_dart,
+	        self.lidar1_dart, self.lidar2_dart,
+	        self.detected_dart, self.lean_text
+	    ]
+	    if self.score_text:
+	        artists.append(self.score_text)
+	    if self.lean_arrow:
+	        artists.append(self.lean_arrow)
+	    if self.arrow_text:
+	        artists.append(self.arrow_text)
+	    
+	    return artists
+
     
-    # Process LIDAR 1 queue
-    while not self.lidar1_queue.empty():
-        angle, distance = self.lidar1_queue.get()
-        x, y = self.polar_to_cartesian(angle, distance, self.lidar1_pos, 
-                                    self.lidar1_rotation, self.lidar1_mirror)
-        if x is not None and y is not None:
-            # Filter points by radii
-            in_range, _ = self.filter_points_by_radii(x, y)
-            if in_range:
-                lidar1_points_x.append(x)
-                lidar1_points_y.append(y)
-                self.lidar1_recent_points.append((x, y))
-    
-    # Process LIDAR 2 queue
-    while not self.lidar2_queue.empty():
-        angle, distance = self.lidar2_queue.get()
-        x, y = self.polar_to_cartesian(angle, distance, self.lidar2_pos, 
-                                    self.lidar2_rotation, self.lidar2_mirror)
-        if x is not None and y is not None:
-            # Filter points by radii
-            in_range, _ = self.filter_points_by_radii(x, y)
-            if in_range:
-                lidar2_points_x.append(x)
-                lidar2_points_y.append(y)
-                self.lidar2_recent_points.append((x, y))
-    
-    # Keep only the most recent points
-    self.lidar1_recent_points = self.lidar1_recent_points[-self.max_recent_points:]
-    self.lidar2_recent_points = self.lidar2_recent_points[-self.max_recent_points:]
-    
-    # Get the camera data
-    camera_y = self.camera_data["dart_mm_y"]
-    side_lean_angle = self.camera_data["dart_angle"]
-    
-    # Calculate lean angle
-    up_down_lean_angle = 0
-    lean_confidence = 0
-    
-    if len(self.lidar1_recent_points) > 0 and len(self.lidar2_recent_points) > 0:
-        lidar1_point = self.lidar1_recent_points[-1]
-        lidar2_point = self.lidar2_recent_points[-1]
+        
+        # When both LIDARs have data, we can detect up/down lean and weight accordingly
         up_down_lean_angle, lean_confidence = self.detect_up_down_lean(lidar1_point, lidar2_point)
-    
-    # Update lean visualization
-    self.update_lean_visualization(side_lean_angle, up_down_lean_angle, lean_confidence)
-    
-    # Find where the camera vector intersects with the board
-    camera_point = self.find_camera_board_intersection(camera_y)
-    
-    # Project LIDAR points with 3D lean correction
-    lidar1_projected = None
-    lidar2_projected = None
-    
-    if len(self.lidar1_recent_points) > 0:
-        lidar1_point = self.lidar1_recent_points[-1]
-        lidar1_projected = self.project_lidar_point_with_3d_lean(
-            lidar1_point, self.lidar1_height, side_lean_angle, 
-            up_down_lean_angle, camera_y
-        )
-    
-    if len(self.lidar2_recent_points) > 0:
-        lidar2_point = self.lidar2_recent_points[-1]
-        lidar2_projected = self.project_lidar_point_with_3d_lean(
-            lidar2_point, self.lidar2_height, side_lean_angle, 
-            up_down_lean_angle, camera_y
-        )
-    
-    # Calculate final tip position
-    final_tip_position = self.calculate_final_tip_position(
-        camera_point, lidar1_projected, lidar2_projected
-    )
-    
-    # Apply segment-specific coefficients
-    if final_tip_position is not None:
-        x, y = final_tip_position
-        x, y = self.apply_segment_coefficients(x, y)
-        x, y = self.apply_calibration_correction(x, y)
-        final_tip_position = (x, y)
-    
-    # Log data to CSV
-    self.log_dart_data(
-        final_tip_position, 
-        self.camera_data["tip_pixel"], 
-        side_lean_angle, 
-        up_down_lean_angle
-    )
-    
-    # Update plot with new data
-    self.scatter1.set_data(lidar1_points_x, lidar1_points_y)
-    self.scatter2.set_data(lidar2_points_x, lidar2_points_y)
-    
-    # Update camera vector
-    if camera_point is not None:
-        self.camera_vector.set_data(
-            [self.camera_position[0], camera_point[0]],
-            [self.camera_position[1], camera_point[1]]
-        )
-        self.camera_dart.set_data([camera_point[0]], [camera_point[1]])
-    else:
-        self.camera_vector.set_data([], [])
-        self.camera_dart.set_data([], [])
-    
-    # Update LIDAR projections
-    if lidar1_projected is not None:
-        self.lidar1_dart.set_data([lidar1_projected[0]], [lidar1_projected[1]])
-    else:
-        self.lidar1_dart.set_data([], [])
         
-    if lidar2_projected is not None:
-        self.lidar2_dart.set_data([lidar2_projected[0]], [lidar2_projected[1]])
-    else:
-        self.lidar2_dart.set_data([], [])
-    
-    # Update final tip position
-    if final_tip_position is not None:
-        self.detected_dart.set_data([final_tip_position[0]], [final_tip_position[1]])
-        
-        # Update score text if point is on board
-        score = self.xy_to_dartboard_score(final_tip_position[0], final_tip_position[1])
-        if score != "Outside":
-            description = self.get_score_description(score)
-            if self.score_text:
-                self.score_text.set_text(description)
-            else:
-                self.score_text = self.ax.text(-380, 360, description, fontsize=12, color='red')
-    else:
-        self.detected_dart.set_data([], [])
-    
-    # Update lean text
-    # Properly handle None values in f-string formatting
-    if side_lean_angle is not None:
-        side_lean_str = f"{side_lean_angle:.1f}°"  # Fixed degree symbol
-    else:
-        side_lean_str = "N/A"
-
-    if up_down_lean_angle is not None:
-        up_down_lean_str = f"{up_down_lean_angle:.1f}°"  # Fixed degree symbol
-    else:
-        up_down_lean_str = "N/A"
-
-    lean_text = f"Side Lean: {side_lean_str}\nUp/Down: {up_down_lean_str}"
-    self.lean_text.set_text(lean_text)
-    
-    # Return all the artists that need to be redrawn
-    artists = [
-        self.scatter1, self.scatter2, 
-        self.camera_vector, self.camera_dart,
-        self.lidar1_dart, self.lidar2_dart, 
-        self.detected_dart, self.lean_text
-    ]
-    
-    if hasattr(self, 'score_text') and self.score_text:
-        artists.append(self.score_text)
-    
-    if hasattr(self, 'lean_arrow') and self.lean_arrow:
-        artists.append(self.lean_arrow)
-    
-    if hasattr(self, 'arrow_text') and self.arrow_text:
-        artists.append(self.arrow_text)
-        
-    return artists
-    def calculate_final_tip_position(self, camera_point, lidar1_point, lidar2_point):
-    """
-    Calculate the final tip position using all available data with enhanced 3D lean correction.
-    
-    Args:
-        camera_point: Intersection of camera vector with board
-        lidar1_point: Projected LIDAR 1 point
-        lidar2_point: Projected LIDAR 2 point
-        
-    Returns:
-        (x, y) final estimated tip position
-    """
-    # Points that are actually available
-    valid_lidar_points = []
-    if lidar1_point is not None:
-        valid_lidar_points.append(lidar1_point)
-    if lidar2_point is not None:
-        valid_lidar_points.append(lidar2_point)
-        
-    # If no valid LIDAR points, can't determine position reliably
-    # Camera is now used primarily for lean detection, not for positioning
-    if not valid_lidar_points:
-        return camera_point
-        
-    # If only one LIDAR has data, use that LIDAR for positioning
-    if len(valid_lidar_points) == 1:
-        # Apply the camera's Y position if available
+        # Enhanced weighting system that considers up/down lean
+        if abs(up_down_lean_angle) > 5 and lean_confidence > 0.7:
+            # Direction of lean affects which LIDAR to trust more
+            if up_down_lean_angle > 0:  # Leaning upward
+                # Give more weight to LIDAR 1
+                weight1 = 0.7
+                weight2 = 0.3
+            else:  # Leaning downward
+                # Give more weight to LIDAR 2
+                weight1 = 0.3
+                weight2 = 0.7
+                
+            # Calculate weighted average of LIDAR positions
+            x = lidar1_point[0] * weight1 + lidar2_point[0] * weight2
+            y = lidar1_point[1] * weight1 + lidar2_point[1] * weight2
+        else:
+            # No significant up/down lean, use equal weighting for LIDARs
+            x = (lidar1_point[0] + lidar2_point[0]) / 2
+            y = (lidar1_point[1] + lidar2_point[1]) / 2
+            
+        # If camera data is available, apply additional side lean correction
         if camera_point is not None and self.camera_data["dart_angle"] is not None:
-            # Determine lean direction and apply correction
             side_lean_angle = self.camera_data["dart_angle"]
             
-            # Get the LIDAR point's original coordinates
-            x, y = valid_lidar_points[0]
-            
-            # Apply lean-based Y correction if significant lean detected
+            # Apply lean-based Y correction only if significant lean detected
             if side_lean_angle < 85:  # Left lean
                 # Calculate correction factor based on how much lean (more horizontal = more correction)
                 lean_factor = (85 - side_lean_angle) / 85.0
@@ -1577,65 +1687,12 @@ def project_lidar_point_with_3d_lean(self, lidar_point, lidar_height, side_lean_
                 # Move Y coordinate UP for right lean
                 y_correction = lean_factor * self.side_lean_max_adjustment
                 y += y_correction
-            
-            # Apply scale correction
-            x = x * self.x_scale_correction
-            y = y * self.y_scale_correction
-            
-            return (x, camera_point[1])
-        else:
-            # Just use the LIDAR point with scale correction
-            x, y = valid_lidar_points[0]
-            x = x * self.x_scale_correction
-            y = y * self.y_scale_correction
-            return (x, y)
-    
-    # When both LIDARs have data, we can detect up/down lean and weight accordingly
-    up_down_lean_angle, lean_confidence = self.detect_up_down_lean(lidar1_point, lidar2_point)
-    
-    # Enhanced weighting system that considers up/down lean
-    if abs(up_down_lean_angle) > 5 and lean_confidence > 0.7:
-        # Direction of lean affects which LIDAR to trust more
-        if up_down_lean_angle > 0:  # Leaning upward
-            # Give more weight to LIDAR 1
-            weight1 = 0.7
-            weight2 = 0.3
-        else:  # Leaning downward
-            # Give more weight to LIDAR 2
-            weight1 = 0.3
-            weight2 = 0.7
-            
-        # Calculate weighted average of LIDAR positions
-        x = lidar1_point[0] * weight1 + lidar2_point[0] * weight2
-        y = lidar1_point[1] * weight1 + lidar2_point[1] * weight2
-    else:
-        # No significant up/down lean, use equal weighting for LIDARs
-        x = (lidar1_point[0] + lidar2_point[0]) / 2
-        y = (lidar1_point[1] + lidar2_point[1]) / 2
         
-    # If camera data is available, apply additional side lean correction
-    if camera_point is not None and self.camera_data["dart_angle"] is not None:
-        side_lean_angle = self.camera_data["dart_angle"]
+        # Apply scale correction to final position
+        x = x * self.x_scale_correction
+        y = y * self.y_scale_correction
         
-        # Apply lean-based Y correction only if significant lean detected
-        if side_lean_angle < 85:  # Left lean
-            # Calculate correction factor based on how much lean (more horizontal = more correction)
-            lean_factor = (85 - side_lean_angle) / 85.0
-            # Move Y coordinate DOWN for left lean
-            y_correction = -lean_factor * self.side_lean_max_adjustment
-            y += y_correction
-        elif side_lean_angle > 95:  # Right lean
-            # Calculate correction factor based on how much lean
-            lean_factor = (side_lean_angle - 95) / 85.0
-            # Move Y coordinate UP for right lean
-            y_correction = lean_factor * self.side_lean_max_adjustment
-            y += y_correction
-    
-    # Apply scale correction to final position
-    x = x * self.x_scale_correction
-    y = y * self.y_scale_correction
-    
-    return (x, y)    
+        return (x, y)    
     def run(self, lidar1_script, lidar2_script):
         """Start all components with the specified LIDAR scripts."""
         # Start background threads
@@ -1782,8 +1839,8 @@ def project_lidar_point_with_3d_lean(self, lidar_point, lidar_height, side_lean_
     def _calibrate_lidar_rotation(self):
         """Interactive calibration for LIDAR rotation."""
         print("LIDAR Rotation Calibration Mode")
-        print(f"Current LIDAR1 rotation: {self.lidar1_rotation}Ã‚Â°")
-        print(f"Current LIDAR2 rotation: {self.lidar2_rotation}Ã‚Â°")
+        print(f"Current LIDAR1 rotation: {self.lidar1_rotation}ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°")
+        print(f"Current LIDAR2 rotation: {self.lidar2_rotation}ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°")
         
         while True:
             cmd = input("Enter L1+/L1-/L2+/L2- followed by degrees (e.g., L1+0.5) or 'q' to quit: ")
@@ -1800,8 +1857,8 @@ def project_lidar_point_with_3d_lean(self, lidar_point, lidar_height, side_lean_
                 elif cmd.startswith("L2-"):
                     self.lidar2_rotation -= float(cmd[3:])
                     
-                print(f"Updated LIDAR1 rotation: {self.lidar1_rotation}Ã‚Â°")
-                print(f"Updated LIDAR2 rotation: {self.lidar2_rotation}Ã‚Â°")
+                print(f"Updated LIDAR1 rotation: {self.lidar1_rotation}ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°")
+                print(f"Updated LIDAR2 rotation: {self.lidar2_rotation}ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°")
             except:
                 print("Invalid command format")
     
@@ -1942,6 +1999,7 @@ if __name__ == "__main__":
     lidar2_script = "./tri_test_lidar2"
     
     visualizer = LidarCameraVisualizer()
+    visualizer.load_standard_calibration_points()
     
     # Try to load settings from files
     visualizer.load_coefficient_scaling()
