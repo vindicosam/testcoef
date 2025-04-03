@@ -577,7 +577,7 @@ class LidarCameraVisualizer:
                                 'Score'])
         
         print(f"CSV logging initialized: {self.csv_filename}")
- def is_new_dart(self, candidate, threshold=10.0):
+ def is_new_dart(self, candidate, threshold=2.0):
 	    """
 	    Check if the candidate dart position is sufficiently far from any already locked dart.
 	    
@@ -1492,7 +1492,7 @@ class LidarCameraVisualizer:
                 length_includes_head=True
             )
 
-    def update_plot(self, frame):
+def update_plot(self, frame):
 	    # --- Process LIDAR 1 Data ---
 	    lidar1_points_x = []
 	    lidar1_points_y = []
@@ -1556,36 +1556,33 @@ class LidarCameraVisualizer:
 	            lidar2_point, self.lidar2_height, side_lean_angle, up_down_lean_angle, camera_y)
 	    
 	    # --- Dart Locking Logic ---
-	    # Compute a tentative dart tip position based on current data
+	    # Compute a tentative dart tip position based on current data.
 	    tentative_tip = self.calculate_final_tip_position(camera_point, lidar1_projected, lidar2_projected)
 	    
 	    if tentative_tip is not None:
 	        if self.current_locked_tip is None:
-	            # First candidate for locking
 	            self.current_locked_tip = tentative_tip
 	            self.lock_counter = 1
 	        else:
-	            # Check stability: compare new detection to current candidate
 	            delta = np.linalg.norm(np.array(tentative_tip) - np.array(self.current_locked_tip))
 	            if delta < self.stability_threshold:
 	                self.lock_counter += 1
 	            else:
-	                # Candidate changed significantly; reset counter
 	                self.current_locked_tip = tentative_tip
 	                self.lock_counter = 1
 	        
-	        # Lock the dart if it has been stable for enough frames and it's a new dart
+	        # Lock the dart if it has been stable for enough frames and is a new dart.
+	        # The is_new_dart() check here uses a threshold of 2 mm.
 	        if (self.lock_counter >= self.frames_to_lock and not self.dart_locked and 
-	            self.is_new_dart(self.current_locked_tip)):
+	            self.is_new_dart(self.current_locked_tip, threshold=2.0)):
 	            self.dart_locked = True
 	            self.locked_darts.append(self.current_locked_tip)
-	            self.last_lock_time = time.time()  # Record the time of locking
+	            self.last_lock_time = time.time()  # Record time of locking
 	            self.log_dart_data(self.current_locked_tip,
 	                               self.camera_data["tip_pixel"],
 	                               side_lean_angle, up_down_lean_angle)
 	            print(f"Dart locked at: {self.current_locked_tip}")
 	    
-	    # Choose the final tip position: if a dart is locked, keep using its position
 	    if self.dart_locked:
 	        final_tip_position = self.current_locked_tip
 	    else:
@@ -1644,14 +1641,12 @@ class LidarCameraVisualizer:
 	    else:
 	        self.detected_dart.set_data([], [])
 	    
-	    # Update lean text display
 	    side_lean_str = f"{side_lean_angle:.1f}°" if side_lean_angle is not None else "N/A"
 	    up_down_lean_str = f"{up_down_lean_angle:.1f}°" if up_down_lean_angle is not None else "N/A"
 	    lean_text = f"Side Lean: {side_lean_str}\nUp/Down: {up_down_lean_str}"
 	    self.lean_text.set_text(lean_text)
 	    # --- End Update Plot Elements ---
 	    
-	    # --- Reset for Next Dart ---
 	    if self.reset_for_new_dart():
 	        self.dart_locked = False
 	        self.current_locked_tip = None
@@ -1660,7 +1655,6 @@ class LidarCameraVisualizer:
 	        self.lidar2_recent_points = []
 	        print("Ready for next dart.")
 	    
-	    # Return the updated artist list for FuncAnimation
 	    artists = [
 	        self.scatter1, self.scatter2,
 	        self.camera_vector, self.camera_dart,
@@ -1675,6 +1669,7 @@ class LidarCameraVisualizer:
 	        artists.append(self.arrow_text)
 	    
 	    return artists
+
 
     
         
