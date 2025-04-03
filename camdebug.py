@@ -428,7 +428,7 @@ class OptimizedDartTracker:
     
     def detect_point_with_subpixel(self, contour, roi_center_y):
         """
-        Detect dart with subpixel accuracy
+        Detect dart with subpixel accuracy using moments
         
         Args:
             contour: Detected contour
@@ -444,32 +444,10 @@ class OptimizedDartTracker:
         x, y, w, h = cv2.boundingRect(contour)
         center_x = x + w / 2
         
-        # Use moments for more accurate center
+        # Use moments for more accurate center (this already gives sub-pixel accuracy)
         M = cv2.moments(contour)
         if M["m00"] > 0:
             center_x = M["m10"] / M["m00"]
-        
-        # Further refine with subpixel corner detection if the contour is big enough
-        if cv2.contourArea(contour) > 10:
-            # Extract points along the contour
-            contour_points = contour.reshape(-1, 2).astype(np.float32)
-            
-            # Apply subpixel refinement
-            refined_points = cv2.cornerSubPix(
-                cv2.cvtColor(np.zeros((480, 640), np.uint8), cv2.COLOR_GRAY2BGR),
-                contour_points,
-                self.subpixel_window,
-                (-1, -1),
-                (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 
-                 self.subpixel_iterations, 
-                 self.subpixel_epsilon)
-            )
-            
-            # Calculate refined center
-            refined_x = np.mean(refined_points[:, 0])
-            # Use refined x if it's reasonably close to the original
-            if abs(refined_x - center_x) < w:
-                center_x = refined_x
         
         return center_x
     
