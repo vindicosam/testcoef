@@ -822,136 +822,103 @@ def process_camera1_frame(self, frame):
         print(f"\nCalibration point set to ({board_x}, {board_y})")
         print("Place dart at this position and press 'c' to capture pixel values")
 
-    def run(self):
-        cap1 = cv2.VideoCapture(self.cam_index1)
-        cap1.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
-        cap1.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
+def run(self):
+    cap1 = cv2.VideoCapture(self.cam_index1)
+    cap1.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
+    cap1.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
 
-        cap2 = cv2.VideoCapture(self.cam_index2)
-        cap2.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
-        cap2.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
+    cap2 = cv2.VideoCapture(self.cam_index2)
+    cap2.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
+    cap2.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
 
-        print("\n*** DUAL CAMERA DART TRACKER ***")
-        print("Press 'q' to exit.")
-        print("Press 't' to toggle calibration mode.")
-        print("Press 'c' in calibration mode to capture current point.")
-        print("Press 'r' to reset background subtractors.")
-        print("Press 's' to save current calibration to file.")
-        print("Press 'l' to load calibration from file.")
-        print("Press 'f' to manually freeze/unfreeze background.")
-        
-        prev_time = time.time()
-        frame_count = 0
-        fps = 0
-        
-        while True:
-            ret1, frame1 = cap1.read()
-            ret2, frame2 = cap2.read()
-            if not ret1 or not ret2:
-                print("Error reading from one or both cameras.")
-                break
+    print("\n*** DUAL CAMERA DART TRACKER ***")
+    print("Press 'q' to exit.")
+    print("Press 't' to toggle calibration mode.")
+    print("Press 'c' in calibration mode to capture current point.")
+    print("Press 'r' to reset background subtractors.")
+    print("Press 's' to save current calibration to file.")
+    print("Press 'l' to load calibration from file.")
+    print("Press 'f' to manually freeze/unfreeze background.")
+    
+    prev_time = time.time()
+    frame_count = 0
+    fps = 0
+    
+    while True:
+        ret1, frame1 = cap1.read()
+        ret2, frame2 = cap2.read()
+        if not ret1 or not ret2:
+            print("Error reading from one or both cameras.")
+            break
 
-            # Update background freeze counter
-            if self.freeze_background:
-                self.freeze_duration += 1
-                if self.freeze_duration >= self.max_freeze_duration:
-                    self.freeze_background = False
-                    print("Background unfrozen")
-                    
-            current_time = time.time()
-            frame_count += 1
-            if (current_time - prev_time) > 1.0:
-                fps = frame_count / (current_time - prev_time)
-                frame_count = 0
-                prev_time = current_time
-
-            proc_frame1, fg_mask1 = self.process_camera1_frame(frame1)
-            proc_frame2, fg_mask2 = self.process_camera2_frame(frame2)
-            board_proj = self.update_board_projection()
-            
-            cv2.putText(board_proj, f"FPS: {fps:.1f}", (10, 30), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
-                      
-            if self.calibration_mode:
-                cv2.putText(board_proj, "CALIBRATION MODE", (10, 60), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                if self.calibration_point:
-                    cv2.putText(board_proj, f"Current point: {self.calibration_point}", (10, 90), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-
-            cv2.imshow("Camera 1 Feed", proc_frame1)
-            cv2.imshow("Camera 1 FG Mask", fg_mask1)
-            cv2.imshow("Camera 2 Feed", proc_frame2)
-            cv2.imshow("Camera 2 FG Mask", fg_mask2)
-            cv2.imshow("Board Projection", board_proj)
-
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord("q"):
-                break
-            elif key == ord("t"):
-                self.toggle_calibration_mode()
-            elif key == ord("f"):
-                # Manually toggle background freeze
-                self.freeze_background = not self.freeze_background
-                self.freeze_duration = 0
-                print(f"Background freeze {'activated' if self.freeze_background else 'deactivated'}")
-            elif key == ord("c") and self.calibration_mode:
-                if self.calibration_point is None:
-                    print("Please set calibration point first (using number keys 0-9 or keys m, n)")
-                else:
-                    cam1_pixel = None
-                    cam2_pixel = None
-                    if self.cam1_vector is not None:
-                        for contour in cv2.findContours(fg_mask1, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]:
-                            if cv2.contourArea(contour) > 20:
-                                x, y, w, h = cv2.boundingRect(contour)
-                                cam1_pixel = x + w // 2
-                                break
-                    
-                    if self.cam2_vector is not None:
-                        for contour in cv2.findContours(fg_mask2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]:
-                            if cv2.contourArea(contour) > 20:
-                                x, y, w, h = cv2.boundingRect(contour)
-                                cam2_pixel = x + w // 2
-                                break
-                    
-                    if cam1_pixel is not None and cam2_pixel is not None:
-                        print(f"Calibration point: ({self.calibration_point[0]}, {self.calibration_point[1]}) => Cam1: {cam1_pixel}, Cam2: {cam2_pixel}")
-                        print(f"Add to calibration points: ({self.calibration_point[0]}, {self.calibration_point[1]}, {cam1_pixel}, {cam2_pixel})")
-                        self.calibration_points[self.calibration_point] = (cam1_pixel, cam2_pixel)
-                        self.cam1_pixel_to_board_mapping = []
-                        self.cam2_pixel_to_board_mapping = []
-                        for (board_x, board_y), (cam1_pixel_x, cam2_pixel_x) in self.calibration_points.items():
-                            self.cam1_pixel_to_board_mapping.append((cam1_pixel_x, board_x))
-                            self.cam2_pixel_to_board_mapping.append((cam2_pixel_x, board_y))
-                        self.cam1_pixel_to_board_mapping.sort(key=lambda x: x[0])
-                        self.cam2_pixel_to_board_mapping.sort(key=lambda x: x[0])
-                    else:
-                        print("Could not detect dart in one or both cameras")
-            elif key == ord("r"):
-                print("Resetting background subtractors")
-                self.bg_subtractor1 = cv2.createBackgroundSubtractorMOG2(history=5000, varThreshold=67, detectShadows=False)
-                self.bg_subtractor2 = cv2.createBackgroundSubtractorMOG2(history=5000, varThreshold=40, detectShadows=False)
-                # Don't reset persistence tracking to maintain last dart position
+        # Update background freeze counter
+        if self.freeze_background:
+            self.freeze_duration += 1
+            if self.freeze_duration >= self.max_freeze_duration:
                 self.freeze_background = False
-                self.freeze_duration = 0
-            elif key == ord("s"):
-                print("Saving calibration points to file")
-                try:
-                    import json
-                    with open("dart_calibration.json", "w") as f:
-                        json.dump({str(k): v for k, v in self.calibration_points.items()}, f)
-                    print("Calibration saved successfully")
-                except Exception as e:
-                    print(f"Error saving calibration: {e}")
-            elif key == ord("l"):
-                print("Loading calibration points from file")
-                try:
-                    import json
-                    import ast
-                    with open("dart_calibration.json", "r") as f:
-                        loaded_points = json.load(f)
-                        self.calibration_points = {ast.literal_eval(k): v for k, v in loaded_points.items()}
+                print("Background unfrozen")
+                
+        current_time = time.time()
+        frame_count += 1
+        if (current_time - prev_time) > 1.0:
+            fps = frame_count / (current_time - prev_time)
+            frame_count = 0
+            prev_time = current_time
+
+        proc_frame1, fg_mask1 = self.process_camera1_frame(frame1)
+        proc_frame2, fg_mask2 = self.process_camera2_frame(frame2)
+        board_proj = self.update_board_projection()
+        
+        cv2.putText(board_proj, f"FPS: {fps:.1f}", (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+                  
+        if self.calibration_mode:
+            cv2.putText(board_proj, "CALIBRATION MODE", (10, 60), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            if self.calibration_point:
+                cv2.putText(board_proj, f"Current point: {self.calibration_point}", (10, 90), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+        cv2.imshow("Camera 1 Feed", proc_frame1)
+        cv2.imshow("Camera 1 FG Mask", fg_mask1)
+        cv2.imshow("Camera 2 Feed", proc_frame2)
+        cv2.imshow("Camera 2 FG Mask", fg_mask2)
+        cv2.imshow("Board Projection", board_proj)
+
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord("q"):
+            break
+        elif key == ord("t"):
+            self.toggle_calibration_mode()
+        elif key == ord("f"):
+            # Manually toggle background freeze
+            self.freeze_background = not self.freeze_background
+            self.freeze_duration = 0
+            print(f"Background freeze {'activated' if self.freeze_background else 'deactivated'}")
+        elif key == ord("c") and self.calibration_mode:
+            if self.calibration_point is None:
+                print("Please set calibration point first (using number keys 0-9 or keys m, n)")
+            else:
+                cam1_pixel = None
+                cam2_pixel = None
+                if self.cam1_vector is not None:
+                    for contour in cv2.findContours(fg_mask1, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]:
+                        if cv2.contourArea(contour) > 20:
+                            x, y, w, h = cv2.boundingRect(contour)
+                            cam1_pixel = x + w // 2
+                            break
+                
+                if self.cam2_vector is not None:
+                    for contour in cv2.findContours(fg_mask2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]:
+                        if cv2.contourArea(contour) > 20:
+                            x, y, w, h = cv2.boundingRect(contour)
+                            cam2_pixel = x + w // 2
+                            break
+                
+                if cam1_pixel is not None and cam2_pixel is not None:
+                    print(f"Calibration point: ({self.calibration_point[0]}, {self.calibration_point[1]}) => Cam1: {cam1_pixel}, Cam2: {cam2_pixel}")
+                    print(f"Add to calibration points: ({self.calibration_point[0]}, {self.calibration_point[1]}, {cam1_pixel}, {cam2_pixel})")
+                    self.calibration_points[self.calibration_point] = (cam1_pixel, cam2_pixel)
                     self.cam1_pixel_to_board_mapping = []
                     self.cam2_pixel_to_board_mapping = []
                     for (board_x, board_y), (cam1_pixel_x, cam2_pixel_x) in self.calibration_points.items():
@@ -959,40 +926,69 @@ def process_camera1_frame(self, frame):
                         self.cam2_pixel_to_board_mapping.append((cam2_pixel_x, board_y))
                     self.cam1_pixel_to_board_mapping.sort(key=lambda x: x[0])
                     self.cam2_pixel_to_board_mapping.sort(key=lambda x: x[0])
-                    print("Calibration loaded successfully")
-                except Exception as e:
-                    print(f"Error loading calibration: {e}")
-            elif key >= ord("0") and key <= ord("9") and self.calibration_mode:
-                segment_num = key - ord("0")
-                if segment_num in self.board_segments:
-                    self.set_calibration_point(*self.board_segments[segment_num])
                 else:
-                    print(f"No segment {segment_num} defined")
-            # Add support for selecting the additional calibration points with m, n keys
-            elif key == ord("m") and self.calibration_mode:
-                # Cycle through additional calibration points (100+)
-                additional_segments = [s for s in self.board_segments.keys() if s >= 100]
-                if additional_segments:
-                    selected = additional_segments[0]
-                    self.set_calibration_point(*self.board_segments[selected])
-                    # Move this segment to the end for cycling through points
-                    self.board_segments[selected + 1000] = self.board_segments.pop(selected)
-            elif key == ord("n") and self.calibration_mode:
-                # Reset segment numbering for cycling
-                temp_segments = {}
-                next_id = 100
-                for k, v in self.board_segments.items():
-                    if k >= 1000:  # These were moved for cycling
-                        temp_segments[next_id] = v
-                        next_id += 1
-                    elif k < 100:  # Original segments stay as is
-                        temp_segments[k] = v
-                self.board_segments = temp_segments
+                    print("Could not detect dart in one or both cameras")
+        elif key == ord("r"):
+            print("Resetting background subtractors")
+            self.bg_subtractor1 = cv2.createBackgroundSubtractorMOG2(history=5000, varThreshold=67, detectShadows=False)
+            self.bg_subtractor2 = cv2.createBackgroundSubtractorMOG2(history=5000, varThreshold=40, detectShadows=False)
+            # Don't reset persistence tracking to maintain last dart position
+            self.freeze_background = False
+            self.freeze_duration = 0
+        elif key == ord("s"):
+            print("Saving calibration points to file")
+            try:
+                import json
+                with open("dart_calibration.json", "w") as f:
+                    json.dump({str(k): v for k, v in self.calibration_points.items()}, f)
+                print("Calibration saved successfully")
+            except Exception as e:
+                print(f"Error saving calibration: {e}")
+        elif key == ord("l"):
+            print("Loading calibration points from file")
+            try:
+                import json
+                import ast
+                with open("dart_calibration.json", "r") as f:
+                    loaded_points = json.load(f)
+                    self.calibration_points = {ast.literal_eval(k): v for k, v in loaded_points.items()}
+                self.cam1_pixel_to_board_mapping = []
+                self.cam2_pixel_to_board_mapping = []
+                for (board_x, board_y), (cam1_pixel_x, cam2_pixel_x) in self.calibration_points.items():
+                    self.cam1_pixel_to_board_mapping.append((cam1_pixel_x, board_x))
+                    self.cam2_pixel_to_board_mapping.append((cam2_pixel_x, board_y))
+                self.cam1_pixel_to_board_mapping.sort(key=lambda x: x[0])
+                self.cam2_pixel_to_board_mapping.sort(key=lambda x: x[0])
+                print("Calibration loaded successfully")
+            except Exception as e:
+                print(f"Error loading calibration: {e}")
+        elif key >= ord("0") and key <= ord("9") and self.calibration_mode:
+            segment_num = key - ord("0")
+            if segment_num in self.board_segments:
+                self.set_calibration_point(*self.board_segments[segment_num])
+            else:
+                print(f"No segment {segment_num} defined")
+        # Add support for selecting the additional calibration points with m, n keys
+        elif key == ord("m") and self.calibration_mode:
+            # Cycle through additional calibration points (100+)
+            additional_segments = [s for s in self.board_segments.keys() if s >= 100]
+            if additional_segments:
+                selected = additional_segments[0]
+                self.set_calibration_point(*self.board_segments[selected])
+                # Move this segment to the end for cycling through points
+                self.board_segments[selected + 1000] = self.board_segments.pop(selected)
+        elif key == ord("n") and self.calibration_mode:
+            # Reset segment numbering for cycling
+            temp_segments = {}
+            next_id = 100
+            for k, v in self.board_segments.items():
+                if k >= 1000:  # These were moved for cycling
+                    temp_segments[next_id] = v
+                    next_id += 1
+                elif k < 100:  # Original segments stay as is
+                    temp_segments[k] = v
+            self.board_segments = temp_segments
 
-        cap1.release()
-        cap2.release()
-        cv2.destroyAllWindows()
-
-if __name__ == "__main__":
-    trainer = DualCameraEpipolarTrainer()
-    trainer.run()
+    cap1.release()
+    cap2.release()
+    cv2.destroyAllWindows()
