@@ -30,6 +30,30 @@ class DualCameraEpipolarTrainer:
         self.cam2_roi_top = self.cam2_board_plane_y - self.cam2_roi_range
         self.cam2_roi_bottom = self.cam2_board_plane_y + self.cam2_roi_range
 
+        # Known board segments with coordinates - MOVED UP
+        self.board_segments = {
+            4: (90, 50),
+            5: (-20, 103),
+            16: (90, -50),
+            17: (20, -100),
+            18: (114, 121),     # Double 18 
+            15: (119, -117),    # Double 15
+            7: (-118, -121),    # Double 7
+            9: (121, 118),      # Double 9
+            1: (88, 146),       # Double 1
+            2: (-146, -88),     # Double 2  
+            3: (-146, 88),      # Double 3
+            6: (88, -146),      # Double 6
+            8: (-88, -146),     # Double 8
+            10: (0, -169),      # Double 10
+            11: (0, 0),         # Bullseye
+            12: (-88, 146),     # Double 12
+            13: (146, -88),     # Double 13
+            14: (-88, 146),     # Double 14
+            19: (-88, 146),     # Double 19
+            20: (0, 169),       # Double 20
+        }
+
         # Initialize calibration points dictionary
         # Format: (board_x, board_y): (cam1_pixel_x, cam2_pixel_x)
         self.calibration_points = {
@@ -263,6 +287,9 @@ class DualCameraEpipolarTrainer:
             ((-30, 132), (None, None))
         ]
         
+        # Starting ID for new calibration targets
+        next_segment_id = 100
+        
         for board_coord, pixel_vals in extra_calibration_points:
             # Only add points with actual pixel values
             if pixel_vals[0] is not None and pixel_vals[1] is not None:
@@ -270,10 +297,10 @@ class DualCameraEpipolarTrainer:
                 print(f"Added calibration point: {board_coord} => Cam1: {pixel_vals[0]}, Cam2: {pixel_vals[1]}")
             else:
                 # Add these points to the available board segments for calibration
-                # We'll set the segment IDs to 100+ range to avoid conflicts
-                segment_id = len(self.board_segments) + 100
-                self.board_segments[segment_id] = board_coord
-                print(f"Added calibration target point: {board_coord} with ID {segment_id}")
+                # Using a counter instead of length to avoid potential issues
+                self.board_segments[next_segment_id] = board_coord
+                print(f"Added calibration target point: {board_coord} with ID {next_segment_id}")
+                next_segment_id += 1
         
         # Horizontal calibration points
         # Format: board_x, board_y, cam1_pixel_x, cam2_pixel_x
@@ -470,6 +497,34 @@ class DualCameraEpipolarTrainer:
         
         # Sort contours by area (largest first)
         filtered_contours = sorted(filtered_contours, key=cv2.contourArea, reverse=True)
+        
+        for contour in filtered_contours:
+            # Additional shape validation for better reliability
+            perimeter = cv2.arcLength(contour, True)
+            if perimeter > 0:
+                x, y, w, h = cv2.boundingRect(contour)
+                dart_pixel_x = x + w // 2
+                cv2.circle(roi, (dart_pixel_x, roi_center_y), 5, (0, 255, 0), -1)
+                cv2.putText(roi, f"Px: {dart_pixel_x}", (dart_pixel_x + 5, roi_center_y - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+                if self.calibration_mode and self.calibration_point:
+                    print(f"Cam2 pixel for {self.calibration_point}: {dart_pixel_x}")
+                
+                # Only process one contour
+                break
+
+        if dart_pixel_x is not None:
+            board_y = self.interpolate_value(dart_pixel_x, self.cam2_pixel_to_board_mapping)
+            smoothed_board_y = self.apply_smoothing(board_y, 'cam2')
+            self.cam2_vector = (0, smoothed_board_y)
+            cv2.putText(roi, f"Board Y: {smoothed_board_y:.1f}mm", (10, 20), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+            print(f"Camera 2: Detected at pixel x={dart_pixel_x}, mapped to board Y={smoothed_board_y:.1f}mm")
+        else:
+            self.cam2_vector = None
+            
+        frame_rot[self.cam2_roi_top:self.cam2_roi_bottom, :] = roi
+        return frame_rot, fg_maskd(filtered_contours, key=cv2.contourArea, reverse=True)
         
         for contour in filtered_contours:
             # Additional shape validation for better reliability
