@@ -117,7 +117,7 @@ class DualCameraEpipolarTrainer:
                 self.calibration_points[(board_x, board_y)] = (cam1_pixel_x, cam2_pixel_x)
                 print(f"Added calibration point: ({board_x}, {board_y}) => Cam1: {cam1_pixel_x}, Cam2: {cam2_pixel_x}")
 
-        # --- EXTRA CALIBRATION POINTS ---
+       # --- EXTRA CALIBRATION POINTS ---
         # Vertical calibration points
         # Format: board coordinate (x, y) -> (cam1_pixel, cam2_pixel)
         extra_calibration_points = [
@@ -127,7 +127,6 @@ class DualCameraEpipolarTrainer:
             ((0, 136), (318, 105)),
             ((0, 122), (318, 124)),
             ((0, 106), (318, 144)),
-
             ((0, 98), (318, 167)),
             ((0, 89), (318, 179)),
             ((0, 82), (318, 192)),
@@ -139,14 +138,12 @@ class DualCameraEpipolarTrainer:
             ((0, 37), (318, 265)),
             ((0, 29), (318, 276)),
             ((0, 20), (318, 292)),
-
             ((0, 5.85), (318, 313)),
             ((0, 6.85), (318, 308)),
             ((0, 14.9), (318, 298)),
             ((0, -5.85), (318, 328)),
             ((0, -6.85), (318, 334)),
             ((0, -14.9), (318, 344)),
-
             ((0, -16), (318, 349)),
             ((0, -22), (318, 359)),
             ((0, -29), (318, 369)),
@@ -164,7 +161,25 @@ class DualCameraEpipolarTrainer:
             ((0, -132), (318, 519)),
             ((0, -140), (318, 530)),
             ((0, -150), (318, 545)),
-            ((0, -162), (318, 558))
+            ((0, -162), (318, 558)),
+            
+            # Additional positive X-axis calibration points
+            ((108, 0), (148, 323)),
+            ((115, 0), (136, 323)),
+            ((123, 0), (122, 323)),
+            ((131, 0), (128, 322)),
+            ((140, 0), (93, 322)),
+            ((147, 0), (78, 321)),
+            ((161, 0), (63, 321)),
+            
+            # Additional negative X-axis calibration points
+            ((-108, 0), (494, 402)),
+            ((-117, 0), (508, 397)),
+            ((-126, 0), (521, 391)),
+            ((-134, 0), (535, 389)),
+            ((-143, 0), (549, 386)),
+            ((-158, 0), (563, 381)),
+            ((-161, 0), (575, 379))
         ]
         
         for board_coord, pixel_vals in extra_calibration_points:
