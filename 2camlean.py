@@ -467,93 +467,64 @@ class DualCameraEpipolarTrainer:
         
         return new_value
 
-    def process_camera1_frame(self, frame):
-        frame_rot = cv2.rotate(frame, cv2.ROTATE_180)
-        roi = frame_rot[self.cam1_roi_top:self.cam1_roi_bottom, :]
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+def process_camera1_frame(self, frame):
+    frame_rot = cv2.rotate(frame, cv2.ROTATE_180)
+    roi = frame_rot[self.cam1_roi_top:self.cam1_roi_bottom, :]
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    
+    # Apply background subtraction with controlled learning rate
+    if self.freeze_background:
+        # Use zero learning rate to freeze the background model
+        fg_mask = self.bg_subtractor1.apply(gray, learningRate=0)
+    else:
+        # Use very low learning rate to slow adaptation
+        fg_mask = self.bg_subtractor1.apply(gray, learningRate=0.0001)
         
-        # Apply background subtraction with controlled learning rate
-        if self.freeze_background:
-            # Use zero learning rate to freeze the background model
-            fg_mask = self.bg_subtractor1.apply(gray, learningRate=0)
-        else:
-            # Use very low learning rate to slow adaptation
-            fg_mask = self.bg_subtractor1.apply(gray, learningRate=0.0001)
+    fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)[1]
+
+    contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    dart_pixel_x = None
+    
+    roi_center_y = self.cam1_board_plane_y - self.cam1_roi_top
+    cv2.line(roi, (0, roi_center_y), (roi.shape[1], roi_center_y), (0, 255, 255), 1)
+    
+    # Filter contours by area for better reliability
+    filtered_contours = []
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area > 5 and area < 1000:  # Min and max area constraints
+            filtered_contours.append(contour)
+    
+    # Sort contours by area (largest first)
+    filtered_contours = sorted(filtered_contours, key=cv2.contourArea, reverse=True)
+    
+    for contour in filtered_contours:
+        # Additional shape validation for better reliability
+        perimeter = cv2.arcLength(contour, True)
+        if perimeter > 0:
+            x, y, w, h = cv2.boundingRect(contour)
+            dart_pixel_x = x + w // 2
+            cv2.circle(roi, (dart_pixel_x, roi_center_y), 5, (0, 255, 0), -1)
+            cv2.putText(roi, f"Px: {dart_pixel_x}", (dart_pixel_x + 5, roi_center_y - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+            if self.calibration_mode and self.calibration_point:
+                print(f"Cam1 pixel for {self.calibration_point}: {dart_pixel_x}")
             
-        fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)[1]
+            # Only process one contour
+            break
 
-        contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        dart_pixel_x = None
-        
-        roi_center_y = self.cam1_board_plane_y - self.cam1_roi_top
-        cv2.line(roi, (0, roi_center_y), (roi.shape[1], roi_center_y), (0, 255, 255), 1)
-        
-        # Filter contours by area for better reliability
-        filtered_contours = []
-        for contour in contours:
-            area = cv2.contourArea(contour)
-            if area > 5 and area < 1000:  # Min and max area constraints
-                filtered_contours.append(contour)
-        
-        # Sort contours by area (largest first)
-        filtered_contours = sorted(filtered_contours, key=cv2.contourArea, reverse=True)
-        
-        for contour in filtered_contours:
-            # Additional shape validation for better reliability
-            perimeter = cv2.arcLength(contour, True)
-            if perimeter > 0:
-                x, y, w, h = cv2.boundingRect(contour)
-                dart_pixel_x = x + w // 2
-                cv2.circle(roi, (dart_pixel_x, roi_center_y), 5, (0, 255, 0), -1)
-                cv2.putText(roi, f"Px: {dart_pixel_x}", (dart_pixel_x + 5, roi_center_y - 5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
-                if self.calibration_mode and self.calibration_point:
-                    print(f"Cam2 pixel for {self.calibration_point}: {dart_pixel_x}")
-                
-                # Only process one contour
-                break
+    if dart_pixel_x is not None:
+        board_x = self.interpolate_value(dart_pixel_x, self.cam1_pixel_to_board_mapping)
+        smoothed_board_x = self.apply_smoothing(board_x, 'cam1')
+        self.cam1_vector = (smoothed_board_x, 0)
+        cv2.putText(roi, f"Board X: {smoothed_board_x:.1f}mm", (10, 20), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+        print(f"Camera 1: Detected at pixel x={dart_pixel_x}, mapped to board X={smoothed_board_x:.1f}mm")
+    else:
+        self.cam1_vector = None
 
-        if dart_pixel_x is not None:
-            board_y = self.interpolate_value(dart_pixel_x, self.cam2_pixel_to_board_mapping)
-            smoothed_board_y = self.apply_smoothing(board_y, 'cam2')
-            self.cam2_vector = (0, smoothed_board_y)
-            cv2.putText(roi, f"Board Y: {smoothed_board_y:.1f}mm", (10, 20), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-            print(f"Camera 2: Detected at pixel x={dart_pixel_x}, mapped to board Y={smoothed_board_y:.1f}mm")
-        else:
-            self.cam2_vector = None
-            
-        frame_rot[self.cam2_roi_top:self.cam2_roi_bottom, :] = roi
-        return frame_rot, fg_maskd(filtered_contours, key=cv2.contourArea, reverse=True)
-        
-        for contour in filtered_contours:
-            # Additional shape validation for better reliability
-            perimeter = cv2.arcLength(contour, True)
-            if perimeter > 0:
-                x, y, w, h = cv2.boundingRect(contour)
-                dart_pixel_x = x + w // 2
-                cv2.circle(roi, (dart_pixel_x, roi_center_y), 5, (0, 255, 0), -1)
-                cv2.putText(roi, f"Px: {dart_pixel_x}", (dart_pixel_x + 5, roi_center_y - 5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
-                if self.calibration_mode and self.calibration_point:
-                    print(f"Cam1 pixel for {self.calibration_point}: {dart_pixel_x}")
-                
-                # Only process one contour
-                break
-
-        if dart_pixel_x is not None:
-            board_x = self.interpolate_value(dart_pixel_x, self.cam1_pixel_to_board_mapping)
-            smoothed_board_x = self.apply_smoothing(board_x, 'cam1')
-            self.cam1_vector = (smoothed_board_x, 0)
-            cv2.putText(roi, f"Board X: {smoothed_board_x:.1f}mm", (10, 20), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-            print(f"Camera 1: Detected at pixel x={dart_pixel_x}, mapped to board X={smoothed_board_x:.1f}mm")
-        else:
-            self.cam1_vector = None
-
-        frame_rot[self.cam1_roi_top:self.cam1_roi_bottom, :] = roi
-        return frame_rot, fg_mask
-
+    frame_rot[self.cam1_roi_top:self.cam1_roi_bottom, :] = roi
+    return frame_rot, fg_mask
     def process_camera2_frame(self, frame):
         frame_rot = cv2.rotate(frame, cv2.ROTATE_180)
         roi = frame_rot[self.cam2_roi_top:self.cam2_roi_bottom, :]
