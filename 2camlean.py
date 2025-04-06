@@ -7,8 +7,8 @@ import time
 class DualCameraEpipolarTrainer:
     def __init__(self, cam_index1=0, cam_index2=2):
         # Static camera positions in board mm
-        self.camera1_position = (0, 650)    # Front camera fixed position
-        self.camera2_position = (-425, 0)   # Side camera fixed position
+        self.camera1_position = (0, 400)    # Front camera fixed position
+        self.camera2_position = (-450, 35)   # Side camera fixed position
 
         # Camera settings
         self.frame_width = 640
@@ -117,7 +117,7 @@ class DualCameraEpipolarTrainer:
                 self.calibration_points[(board_x, board_y)] = (cam1_pixel_x, cam2_pixel_x)
                 print(f"Added calibration point: ({board_x}, {board_y}) => Cam1: {cam1_pixel_x}, Cam2: {cam2_pixel_x}")
 
-       # --- EXTRA CALIBRATION POINTS ---
+        # --- EXTRA CALIBRATION POINTS ---
         # Vertical calibration points
         # Format: board coordinate (x, y) -> (cam1_pixel, cam2_pixel)
         extra_calibration_points = [
@@ -179,12 +179,101 @@ class DualCameraEpipolarTrainer:
             ((-134, 0), (535, 389)),
             ((-143, 0), (549, 386)),
             ((-158, 0), (563, 381)),
-            ((-161, 0), (575, 379))
+            ((-161, 0), (575, 379)),
+            
+            # New additional calibration points for each segment
+            # Segment 1 (upper right)
+            ((44, 155), (None, None)),
+            ((39, 143), (None, None)),
+            ((30, 132), (None, None)),
+            
+            # Segment 18 (upper right)
+            ((85, 127), (None, None)),
+            ((73, 115), (None, None)),
+            ((65, 100), (None, None)),
+            
+            # Segment 4 (right side)
+            ((120, 85), (None, None)),
+            ((110, 70), (None, None)),
+            ((101, 60), (None, None)),
+            
+            # Segment 13 (right side)
+            ((147, 45), (None, None)),
+            ((135, 37), (None, None)),
+            ((125, 25), (None, None)),
+            
+            # Segment 10 (lower right)
+            ((147, -40), (None, None)),
+            ((135, -50), (None, None)),
+            ((125, -60), (None, None)),
+            
+            # Segment 15 (lower right)
+            ((120, -82), (None, None)),
+            ((105, -92), (None, None)),
+            ((95, -102), (None, None)),
+            
+            # Segment 2 (lower right)
+            ((85, -125), (None, None)),
+            ((75, -132), (None, None)),
+            ((65, -139), (None, None)),
+            
+            # Segment 17 (bottom)
+            ((44, -155), (None, None)),
+            ((35, -158), (None, None)),
+            ((25, -160), (None, None)),
+            
+            # Segment 19 (lower left)
+            ((-44, -155), (None, None)),
+            ((-35, -158), (None, None)),
+            ((-25, -160), (None, None)),
+            
+            # Segment 7 (lower left)
+            ((-85, -125), (None, None)),
+            ((-75, -132), (None, None)),
+            ((-65, -139), (None, None)),
+            
+            # Segment 16 (lower left)
+            ((-120, -82), (None, None)),
+            ((-105, -92), (None, None)),
+            ((-95, -102), (None, None)),
+            
+            # Segment 8 (left side)
+            ((-147, -40), (None, None)),
+            ((-135, -50), (None, None)),
+            ((-125, -60), (None, None)),
+            
+            # Segment 14 (left side)
+            ((-147, 45), (None, None)),
+            ((-135, 37), (None, None)),
+            ((-125, 25), (None, None)),
+            
+            # Segment 9 (upper left)
+            ((-120, 85), (None, None)),
+            ((-110, 70), (None, None)),
+            ((-101, 60), (None, None)),
+            
+            # Segment 12 (upper left)
+            ((-85, 127), (None, None)),
+            ((-73, 115), (None, None)),
+            ((-65, 100), (None, None)),
+            
+            # Segment 5 (upper left)
+            ((-44, 155), (None, None)),
+            ((-39, 143), (None, None)),
+            ((-30, 132), (None, None))
         ]
         
         for board_coord, pixel_vals in extra_calibration_points:
-            self.calibration_points[board_coord] = pixel_vals
-            print(f"Added vertical calibration point: {board_coord} => Cam1: {pixel_vals[0]}, Cam2: {pixel_vals[1]}")
+            # Only add points with actual pixel values
+            if pixel_vals[0] is not None and pixel_vals[1] is not None:
+                self.calibration_points[board_coord] = pixel_vals
+                print(f"Added calibration point: {board_coord} => Cam1: {pixel_vals[0]}, Cam2: {pixel_vals[1]}")
+            else:
+                # Add these points to the available board segments for calibration
+                # We'll set the segment IDs to 100+ range to avoid conflicts
+                segment_id = len(self.board_segments) + 100
+                self.board_segments[segment_id] = board_coord
+                print(f"Added calibration target point: {board_coord} with ID {segment_id}")
         
         # Horizontal calibration points
         # Format: board_x, board_y, cam1_pixel_x, cam2_pixel_x
@@ -256,10 +345,10 @@ class DualCameraEpipolarTrainer:
         cam2_pixel_max = max(x[0] for x in self.cam2_pixel_to_board_mapping)
         print(f"\nCamera 2 pixel range: {cam2_pixel_min} to {cam2_pixel_max} (width coverage: {(cam2_pixel_max - cam2_pixel_min) / self.frame_width * 100:.1f}%)")
 
-        # Background subtractors
+        # Background subtractors with slower learning rate to prevent dart disappearing
         self.bg_subtractor1 = cv2.createBackgroundSubtractorMOG2(history=5000, varThreshold=67, detectShadows=False)
         self.bg_subtractor2 = cv2.createBackgroundSubtractorMOG2(history=5000, varThreshold=40, detectShadows=False)
-
+        
         # Camera indices
         self.cam_index1 = cam_index1
         self.cam_index2 = cam_index2
@@ -279,37 +368,13 @@ class DualCameraEpipolarTrainer:
         self.cam2_vector = None
         self.final_tip = None
         
-        # Known board segments with coordinates
-        self.board_segments = {
-            4: (90, 50),
-            5: (-20, 103),
-            16: (90, -50),
-            17: (20, -100),
-            18: (114, 121),     # Double 18 
-            15: (119, -117),    # Double 15
-            7: (-118, -121),    # Double 7
-            9: (121, 118),      # Double 9
-            1: (88, 146),       # Double 1
-            2: (-146, -88),     # Double 2  
-            3: (-146, 88),      # Double 3
-            6: (88, -146),      # Double 6
-            8: (-88, -146),     # Double 8
-            10: (0, -169),      # Double 10
-            11: (0, 0),         # Bullseye
-            12: (-88, 146),     # Double 12
-            13: (146, -88),     # Double 13
-            14: (-88, 146),     # Double 14
-            19: (-88, 146),     # Double 19
-            20: (0, 169),       # Double 20
-        }
-        
         # Detection history for smoothing
         self.detection_history = {
             'cam1': [],
             'cam2': [],
             'final': []
         }
-        self.history_max_size = 10  # Increased from 3 to 10 to make dart stay longer
+        self.history_max_size = 1  # Set to 1 to avoid dragging effect
         
         # Calibration mode
         self.calibration_mode = False
@@ -318,7 +383,12 @@ class DualCameraEpipolarTrainer:
         # Variables for dart persistence
         self.last_detected_position = None
         self.frames_since_detection = 0
-        self.max_persistence_frames = 120  # Keep showing the dart for 120 frames (about 4 seconds at 30fps)
+        self.max_persistence_frames = 200  # Increased to 200 frames (about 6-7 seconds at 30fps)
+        
+        # Background freezing mechanism
+        self.freeze_background = False
+        self.freeze_duration = 0
+        self.max_freeze_duration = 150  # 5 seconds at 30fps
 
     def interpolate_value(self, pixel_value, mapping_table):
         if not mapping_table:
@@ -374,7 +444,15 @@ class DualCameraEpipolarTrainer:
         frame_rot = cv2.rotate(frame, cv2.ROTATE_180)
         roi = frame_rot[self.cam1_roi_top:self.cam1_roi_bottom, :]
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        fg_mask = self.bg_subtractor1.apply(gray)
+        
+        # Apply background subtraction with controlled learning rate
+        if self.freeze_background:
+            # Use zero learning rate to freeze the background model
+            fg_mask = self.bg_subtractor1.apply(gray, learningRate=0)
+        else:
+            # Use very low learning rate to slow adaptation
+            fg_mask = self.bg_subtractor1.apply(gray, learningRate=0.0001)
+            
         fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)[1]
 
         contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -383,8 +461,20 @@ class DualCameraEpipolarTrainer:
         roi_center_y = self.cam1_board_plane_y - self.cam1_roi_top
         cv2.line(roi, (0, roi_center_y), (roi.shape[1], roi_center_y), (0, 255, 255), 1)
         
+        # Filter contours by area for better reliability
+        filtered_contours = []
         for contour in contours:
-            if cv2.contourArea(contour) > 5:
+            area = cv2.contourArea(contour)
+            if area > 5 and area < 1000:  # Min and max area constraints
+                filtered_contours.append(contour)
+        
+        # Sort contours by area (largest first)
+        filtered_contours = sorted(filtered_contours, key=cv2.contourArea, reverse=True)
+        
+        for contour in filtered_contours:
+            # Additional shape validation for better reliability
+            perimeter = cv2.arcLength(contour, True)
+            if perimeter > 0:
                 x, y, w, h = cv2.boundingRect(contour)
                 dart_pixel_x = x + w // 2
                 cv2.circle(roi, (dart_pixel_x, roi_center_y), 5, (0, 255, 0), -1)
@@ -392,6 +482,8 @@ class DualCameraEpipolarTrainer:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
                 if self.calibration_mode and self.calibration_point:
                     print(f"Cam1 pixel for {self.calibration_point}: {dart_pixel_x}")
+                
+                # Only process one contour
                 break
 
         if dart_pixel_x is not None:
@@ -411,7 +503,15 @@ class DualCameraEpipolarTrainer:
         frame_rot = cv2.rotate(frame, cv2.ROTATE_180)
         roi = frame_rot[self.cam2_roi_top:self.cam2_roi_bottom, :]
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        fg_mask = self.bg_subtractor2.apply(gray)
+        
+        # Apply background subtraction with controlled learning rate
+        if self.freeze_background:
+            # Use zero learning rate to freeze the background model
+            fg_mask = self.bg_subtractor2.apply(gray, learningRate=0)
+        else:
+            # Use very low learning rate to slow adaptation
+            fg_mask = self.bg_subtractor2.apply(gray, learningRate=0.0001)
+            
         fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)[1]
 
         contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -420,8 +520,20 @@ class DualCameraEpipolarTrainer:
         roi_center_y = self.cam2_board_plane_y - self.cam2_roi_top
         cv2.line(roi, (0, roi_center_y), (roi.shape[1], roi_center_y), (0, 255, 255), 1)
         
+        # Filter contours by area for better reliability
+        filtered_contours = []
         for contour in contours:
-            if cv2.contourArea(contour) > 20:
+            area = cv2.contourArea(contour)
+            if area > 20 and area < 1000:  # Min and max area constraints
+                filtered_contours.append(contour)
+        
+        # Sort contours by area (largest first)
+        filtered_contours = sorted(filtered_contours, key=cv2.contourArea, reverse=True)
+        
+        for contour in filtered_contours:
+            # Additional shape validation for better reliability
+            perimeter = cv2.arcLength(contour, True)
+            if perimeter > 0:
                 x, y, w, h = cv2.boundingRect(contour)
                 dart_pixel_x = x + w // 2
                 cv2.circle(roi, (dart_pixel_x, roi_center_y), 5, (0, 255, 0), -1)
@@ -429,6 +541,8 @@ class DualCameraEpipolarTrainer:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
                 if self.calibration_mode and self.calibration_point:
                     print(f"Cam2 pixel for {self.calibration_point}: {dart_pixel_x}")
+                
+                # Only process one contour
                 break
 
         if dart_pixel_x is not None:
@@ -546,6 +660,10 @@ class DualCameraEpipolarTrainer:
                     self.frames_since_detection = 0
                     found_current_detection = True
                     
+                    # Freeze background when a dart is detected
+                    self.freeze_background = True
+                    self.freeze_duration = 0
+                    
                     dart_x, dart_y = smoothed_final_tip
                     final_px = mm_to_canvas_px(dart_x, dart_y)
                     cv2.circle(canvas, final_px, 8, (0, 0, 0), -1)
@@ -636,6 +754,12 @@ class DualCameraEpipolarTrainer:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
             cv2.putText(canvas, label, (final_px[0]+10, final_px[1]), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 1)
+        
+        # Display background freeze status
+        if self.freeze_background:
+            cv2.putText(canvas, "BACKGROUND FROZEN", (10, canvas_size-60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            
         return canvas
         
     def compute_intersection(self):
@@ -688,6 +812,7 @@ class DualCameraEpipolarTrainer:
         print("Press 'r' to reset background subtractors.")
         print("Press 's' to save current calibration to file.")
         print("Press 'l' to load calibration from file.")
+        print("Press 'f' to manually freeze/unfreeze background.")
         
         prev_time = time.time()
         frame_count = 0
@@ -700,6 +825,13 @@ class DualCameraEpipolarTrainer:
                 print("Error reading from one or both cameras.")
                 break
 
+            # Update background freeze counter
+            if self.freeze_background:
+                self.freeze_duration += 1
+                if self.freeze_duration >= self.max_freeze_duration:
+                    self.freeze_background = False
+                    print("Background unfrozen")
+                    
             current_time = time.time()
             frame_count += 1
             if (current_time - prev_time) > 1.0:
@@ -732,9 +864,14 @@ class DualCameraEpipolarTrainer:
                 break
             elif key == ord("t"):
                 self.toggle_calibration_mode()
+            elif key == ord("f"):
+                # Manually toggle background freeze
+                self.freeze_background = not self.freeze_background
+                self.freeze_duration = 0
+                print(f"Background freeze {'activated' if self.freeze_background else 'deactivated'}")
             elif key == ord("c") and self.calibration_mode:
                 if self.calibration_point is None:
-                    print("Please set calibration point first (using number keys 0-9)")
+                    print("Please set calibration point first (using number keys 0-9 or keys m, n)")
                 else:
                     cam1_pixel = None
                     cam2_pixel = None
@@ -767,11 +904,11 @@ class DualCameraEpipolarTrainer:
                         print("Could not detect dart in one or both cameras")
             elif key == ord("r"):
                 print("Resetting background subtractors")
-                self.bg_subtractor1 = cv2.createBackgroundSubtractorMOG2(history=8000, varThreshold=67, detectShadows=False)
-                self.bg_subtractor2 = cv2.createBackgroundSubtractorMOG2(history=8000, varThreshold=67, detectShadows=False)
-                # Reset persistence tracking as well
-                self.last_detected_position = None
-                self.frames_since_detection = 0
+                self.bg_subtractor1 = cv2.createBackgroundSubtractorMOG2(history=5000, varThreshold=67, detectShadows=False)
+                self.bg_subtractor2 = cv2.createBackgroundSubtractorMOG2(history=5000, varThreshold=40, detectShadows=False)
+                # Don't reset persistence tracking to maintain last dart position
+                self.freeze_background = False
+                self.freeze_duration = 0
             elif key == ord("s"):
                 print("Saving calibration points to file")
                 try:
@@ -805,6 +942,26 @@ class DualCameraEpipolarTrainer:
                     self.set_calibration_point(*self.board_segments[segment_num])
                 else:
                     print(f"No segment {segment_num} defined")
+            # Add support for selecting the additional calibration points with m, n keys
+            elif key == ord("m") and self.calibration_mode:
+                # Cycle through additional calibration points (100+)
+                additional_segments = [s for s in self.board_segments.keys() if s >= 100]
+                if additional_segments:
+                    selected = additional_segments[0]
+                    self.set_calibration_point(*self.board_segments[selected])
+                    # Move this segment to the end for cycling through points
+                    self.board_segments[selected + 1000] = self.board_segments.pop(selected)
+            elif key == ord("n") and self.calibration_mode:
+                # Reset segment numbering for cycling
+                temp_segments = {}
+                next_id = 100
+                for k, v in self.board_segments.items():
+                    if k >= 1000:  # These were moved for cycling
+                        temp_segments[next_id] = v
+                        next_id += 1
+                    elif k < 100:  # Original segments stay as is
+                        temp_segments[k] = v
+                self.board_segments = temp_segments
 
         cap1.release()
         cap2.release()
