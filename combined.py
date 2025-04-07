@@ -843,3 +843,220 @@ class LidarDualCameraVisualizer:
             else:
                 return sum(self.detection_history[history_key]) / len(self.detection_history[history_key])
         return new_value
+def update_plot(self, frame):
+        lidar1_points_x = []
+        lidar1_points_y = []
+        lidar2_points_x = []
+        lidar2_points_y = []
+        while not self.lidar1_queue.empty():
+            angle, distance = self.lidar1_queue.get()
+            x, y = self.polar_to_cartesian(angle, distance, self.lidar1_pos, 
+                                        self.lidar1_rotation, self.lidar1_mirror)
+            if x is not None and y is not None:
+                in_range, _ = self.filter_points_by_radii(x, y)
+                if in_range:
+                    lidar1_points_x.append(x)
+                    lidar1_points_y.append(y)
+                    self.lidar1_recent_points.append((x, y))
+        while not self.lidar2_queue.empty():
+            angle, distance = self.lidar2_queue.get()
+            x, y = self.polar_to_cartesian(angle, distance, self.lidar2_pos, 
+                                        self.lidar2_rotation, self.lidar2_mirror)
+            if x is not None and y is not None:
+                in_range, _ = self.filter_points_by_radii(x, y)
+                if in_range:
+                    lidar2_points_x.append(x)
+                    lidar2_points_y.append(y)
+                    self.lidar2_recent_points.append((x, y))
+        self.lidar1_recent_points = self.lidar1_recent_points[-self.max_recent_points:]
+        self.lidar2_recent_points = self.lidar2_recent_points[-self.max_recent_points:]
+        camera_y = self.side_camera_data["dart_mm_y"]
+        side_lean_angle = self.side_camera_data["dart_angle"]
+        up_down_lean_angle = 0
+        lean_confidence = 0
+        if len(self.lidar1_recent_points) > 0 and len(self.lidar2_recent_points) > 0:
+            lidar1_point = self.lidar1_recent_points[-1]
+            lidar2_point = self.lidar2_recent_points[-1]
+            up_down_lean_angle, lean_confidence = self.detect_up_down_lean(lidar1_point, lidar2_point)
+        self.update_lean_visualization(side_lean_angle, up_down_lean_angle, lean_confidence)
+        side_camera_point = self.find_side_camera_board_intersection(camera_y)
+        lidar1_projected = None
+        lidar2_projected = None
+        if len(self.lidar1_recent_points) > 0:
+            lidar1_point = self.lidar1_recent_points[-1]
+            lidar1_projected = self.project_lidar_point_with_3d_lean(
+                lidar1_point, self.lidar1_height, side_lean_angle, 
+                up_down_lean_angle, camera_y
+            )
+        if len(self.lidar2_recent_points) > 0:
+            lidar2_point = self.lidar2_recent_points[-1]
+            lidar2_projected = self.project_lidar_point_with_3d_lean(
+                lidar2_point, self.lidar2_height, side_lean_angle, 
+                up_down_lean_angle, camera_y
+            )
+        lidar_final_tip = self.calculate_lidar_final_tip_position(
+            side_camera_point, lidar1_projected, lidar2_projected
+        )
+        if lidar_final_tip is not None:
+            self.lidar_final_tip = lidar_final_tip
+            self.last_detected_position_lidar = lidar_final_tip
+            self.frames_since_detection_lidar = 0
+        elif self.last_detected_position_lidar is not None and self.frames_since_detection_lidar < self.max_persistence_frames:
+            self.frames_since_detection_lidar += 1
+            self.lidar_final_tip = self.last_detected_position_lidar
+        else:
+            self.lidar_final_tip = None
+        self.log_dart_data(
+            self.lidar_final_tip,
+            self.camera_final_tip,
+            side_lean_angle,
+            up_down_lean_angle
+        )
+        self.scatter1.set_data(lidar1_points_x, lidar1_points_y)
+        self.scatter2.set_data(lidar2_points_x, lidar2_points_y)
+        if side_camera_point is not None:
+            board_x = 0
+            dir_x = board_x - self.side_camera_position[0]
+            dir_y = side_camera_point[1] - self.side_camera_position[1]
+            vector_length = np.sqrt(dir_x**2 + dir_y**2)
+            if vector_length > 0:
+                norm_dir_x = dir_x / vector_length
+                norm_dir_y = dir_y / vector_length
+            else:
+                norm_dir_x, norm_dir_y = 1, 0
+            extended_x = self.side_camera_position[0] + norm_dir_x * self.side_camera_vector_length
+            extended_y = self.side_camera_position[1] + norm_dir_y * self.side_camera_vector_length
+            self.side_camera_vector.set_data(
+                [self.side_camera_position[0], extended_x],
+                [self.side_camera_position[1], extended_y]
+            )
+            self.side_camera_dart.set_data([side_camera_point[0]], [side_camera_point[1]])
+        else:
+            self.side_camera_vector.set_data([], [])
+            self.side_camera_dart.set_data([], [])
+        if lidar1_projected is not None:
+            self.lidar1_dart.set_data([lidar1_projected[0]], [lidar1_projected[1]])
+        else:
+            self.lidar1_dart.set_data([], [])
+        if lidar2_projected is not None:
+            self.lidar2_dart.set_data([lidar2_projected[0]], [lidar2_projected[1]])
+        else:
+            self.lidar2_dart.set_data([], [])
+        if self.lidar_final_tip is not None:
+            self.lidar_detected_dart.set_data([self.lidar_final_tip[0]], [self.lidar_final_tip[1]])
+            lidar_score = self.xy_to_dartboard_score(self.lidar_final_tip[0], self.lidar_final_tip[1])
+            lidar_description = self.get_score_description(lidar_score)
+            self.lidar_score_text.set_text(f"LIDAR: {lidar_description}")
+        else:
+            self.lidar_detected_dart.set_data([], [])
+            self.lidar_score_text.set_text("")
+        if self.cam1_vector is not None:
+            self.camera1_vector.set_data(
+                [self.camera1_position[0], self.cam1_vector[0]], 
+                [self.camera1_position[1], 0]
+            )
+        else:
+            self.camera1_vector.set_data([], [])
+        if self.cam2_vector is not None:
+            self.camera2_vector.set_data(
+                [self.camera2_position[0], 0], 
+                [self.camera2_position[1], self.cam2_vector[1]]
+            )
+        else:
+            self.camera2_vector.set_data([], [])
+        if self.camera_final_tip is not None:
+            self.camera_detected_dart.set_data([self.camera_final_tip[0]], [self.camera_final_tip[1]])
+            camera_score = self.xy_to_dartboard_score(self.camera_final_tip[0], self.camera_final_tip[1])
+            camera_description = self.get_score_description(camera_score)
+            self.camera_score_text.set_text(f"Camera: {camera_description}")
+        else:
+            self.camera_detected_dart.set_data([], [])
+            self.camera_score_text.set_text("")
+        if side_lean_angle is not None:
+            side_lean_str = f"{side_lean_angle:.1f}°"
+        else:
+            side_lean_str = "N/A"
+        if up_down_lean_angle is not None:
+            up_down_lean_str = f"{up_down_lean_angle:.1f}°"
+        else:
+            up_down_lean_str = "N/A"
+        lean_text = f"Side Lean: {side_lean_str}\nUp/Down: {up_down_lean_str}"
+        self.lean_text.set_text(lean_text)
+        
+        # Compute and update the extra epipolar dart placement ("CD")
+        cd_point = self.compute_camera_intersection()  # Same computation as before (unsmoothed)
+        if cd_point is not None:
+            self.cd_dart.set_data([cd_point[0]], [cd_point[1]])
+        else:
+            self.cd_dart.set_data([], [])
+        
+        artists = [
+            self.scatter1, self.scatter2, 
+            self.side_camera_vector, self.side_camera_dart,
+            self.lidar1_dart, self.lidar2_dart, 
+            self.lidar_detected_dart, self.lean_text,
+            self.camera1_vector, self.camera2_vector,
+            self.camera_detected_dart,
+            self.lidar_score_text, self.camera_score_text,
+            self.cd_dart  # Added marker for CD
+        ]
+        
+        if hasattr(self, 'lean_arrow') and self.lean_arrow:
+            artists.append(self.lean_arrow)
+        if hasattr(self, 'arrow_text') and self.arrow_text:
+            artists.append(self.arrow_text)
+            
+        return artists
+
+    def run(self, lidar1_script, lidar2_script):
+        lidar1_thread = threading.Thread(
+            target=self.start_lidar, 
+            args=(lidar1_script, self.lidar1_queue, 1),
+            daemon=True
+        )
+        lidar2_thread = threading.Thread(
+            target=self.start_lidar, 
+            args=(lidar2_script, self.lidar2_queue, 2),
+            daemon=True
+        )
+        
+        # Replace the separate side_camera_thread with a single dual_camera_thread
+        dual_camera_thread = threading.Thread(target=self.dual_camera_detection, daemon=True)
+        
+        lidar1_thread.start()
+        time.sleep(1)
+        lidar2_thread.start()
+        time.sleep(1)
+        dual_camera_thread.start()
+        
+        self.ani = FuncAnimation(
+            self.fig, self.update_plot, 
+            blit=True, interval=100, 
+            cache_frame_data=False
+        )
+        plt.show()
+
+    # CSV logging initialization called in update_plot after plotting
+    def initialize_extra(self):
+        self.x_scale_correction = 1.0
+        self.y_scale_correction = 1.0
+        self.initialize_csv_logging()
+
+# Modified main function to match script 2's interface
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='LIDAR and Dual Camera Dart Tracking')
+    parser.add_argument('--cam1', type=int, default=0, help='Front camera index (default: 0)')
+    parser.add_argument('--cam2', type=int, default=2, help='Side camera index (default: 2)')
+    parser.add_argument('--lidar1', type=str, default="./tri_test_lidar1", help='LIDAR 1 script path')
+    parser.add_argument('--lidar2', type=str, default="./tri_test_lidar2", help='LIDAR 2 script path')
+    
+    args = parser.parse_args()
+    
+    visualizer = LidarDualCameraVisualizer(
+        cam_index1=args.cam1,
+        cam_index2=args.cam2
+    )
+    visualizer.initialize_extra()
+    visualizer.run(args.lidar1, args.lidar2)
